@@ -1,22 +1,52 @@
-# DLSS 5 AIO — Official NVIDIA DLSS DLLs + DLSS 5 Neural Rendering Toolkit
+<p align="center">
+  <img src="docs/images/logo.svg" width="72" height="72" alt="DLSS 5 AIO mark">
+</p>
 
-**Everything you need to get DLSS 5 Neural Rendering running on almost any game — plus the latest official NVIDIA DLSS DLLs for every game that already has DLSS.**
+<h1 align="center">DLSS 5 AIO</h1>
 
-> **⬇️ Download:** grab the latest release here — [github.com/ShugokiFable/dlss5-aio/releases/latest](https://github.com/ShugokiFable/dlss5-aio/releases/latest).
-> It's a 3-part 7-Zip (~635 MB total): download **all 3 parts** into one folder, right-click part `.001`, **Extract Here** (7-Zip), then open **START-HERE.txt**.
+<p align="center"><strong>Official NVIDIA DLSS DLLs plus a DLSS 5 neural-rendering toolkit.</strong></p>
+
+<p align="center">
+  Community pack: latest official Super Resolution / Frame Generation / Ray Reconstruction<br>
+  DLLs, plus Swapper and Feeder tools that can run DLSS 5 neural rendering in games<br>
+  with or without built-in DLSS — including 32-bit titles via a 64-bit helper host.
+</p>
+
+<p align="center">
+  <a href="https://github.com/ShugokiFable/dlss5-aio/actions/workflows/ci.yml"><img src="https://github.com/ShugokiFable/dlss5-aio/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-8fa3b8?labelColor=0b1016" alt="MIT License"></a>
+  <a href="https://github.com/ShugokiFable/dlss5-aio/releases/tag/v1.2.5"><img src="https://img.shields.io/badge/release-v1.2.5-6b8cae?labelColor=0b1016" alt="v1.2.5"></a>
+</p>
+
+<p align="center">
+  <a href="#pick-your-scenario-30-second-guide">Scenarios</a>
+  ·
+  <a href="#install-guides">Install</a>
+  ·
+  <a href="#faq">FAQ</a>
+  ·
+  <a href="#integrity">Integrity</a>
+  ·
+  <a href="START-HERE.txt">START-HERE.txt</a>
+</p>
+
+**Not affiliated with NVIDIA.** This is an unofficial convenience pack. Official DLSS/Streamline binaries keep NVIDIA's licenses; tools keep their authors' licenses. See [`LICENSE.md`](LICENSE.md) and [`CREDITS.md`](CREDITS.md).
 
 | | |
-|---|---|
-| **Pack version** | v1.2.4 (2026-08-31) |
-| **Official NVIDIA DLSS DLLs** | **310.7.129** — Super Resolution, Frame Generation, Ray Reconstruction |
-| **DLSS 5 neural-rendering runtime** | `nvngx_dlssnr.dll` **310.8.0** |
+| --- | --- |
+| **Latest release** | [v1.2.5](https://github.com/ShugokiFable/dlss5-aio/releases/tag/v1.2.5) (docs-only over v1.2.4; binaries identical) |
+| **Official NVIDIA DLSS DLLs** | **310.7.129** — Super Resolution, Frame Generation, Ray Reconstruction (documented in [`01-Official-NVIDIA-DLLs/README.md`](01-Official-NVIDIA-DLLs/README.md); signed production builds in the release 7-Zip, hashed in [`SHA256SUMS.txt`](SHA256SUMS.txt)) |
+| **DLSS 5 neural-rendering runtime** | `nvngx_dlssnr.dll` **310.8.0** (RenoDX community build; documented in [`02-DLSS5-Neural-Rendering/README.md`](02-DLSS5-Neural-Rendering/README.md)) |
 | **Tools** | DLSS5-Swapper **1.1.1** · DLSS5-Feeder **v0.6.0-beta.1** |
 | **Needs** | NVIDIA GPU · Windows 10/11 64-bit · **RTX 40/50** for DLSS 5 neural rendering |
 
-> **What is DLSS 5?** NVIDIA's next-generation neural-rendering upscaler — announced at GTC in March 2026 and planned for a full release in fall 2026. Its runtimes are already circulating, and the community has built tools that make it work in **any** game: with or without built-in DLSS, 64-bit or 32-bit, DirectX 11/12, Vulkan, even DirectX 9.
+Download: [github.com/ShugokiFable/dlss5-aio/releases/latest](https://github.com/ShugokiFable/dlss5-aio/releases/latest). It is a 3-part 7-Zip (~635 MB total): download **all 3 parts** into one folder, right-click part `.001`, **Extract Here** (7-Zip), then open **`START-HERE.txt`**. This git clone is the docs + scripts tree — the large official DLLs live in the release archive, not in git.
+
+**What is DLSS 5?** NVIDIA's next-generation neural-rendering upscaler — announced at GTC in March 2026 and planned for a full release in fall 2026. Its runtimes are already circulating, and the community has built tools that make it work in **any** game: with or without built-in DLSS, 64-bit or 32-bit, DirectX 11/12, Vulkan, even DirectX 9.
+
+This git tree has no app screenshot. Swapper is a third-party installer; Feeder is a ReShade add-on. Do not treat this mark as an NVIDIA logo.
 
 ---
-
 ## 📋 Pick your scenario (30-second guide)
 
 | # | Your situation | What to use | Folder |
@@ -187,6 +217,23 @@ sha256sum -c SHA256SUMS.txt
 ```
 
 ---
+
+## Honest status
+
+Verified in this tree:
+
+- latest GitHub release **v1.2.5** (docs-only over v1.2.4; binaries identical)
+- documented official DLL versions **310.7.129** (SR/FG/RR) and neural runtime **310.8.0** in folder READMEs
+- [SHA256SUMS.txt](SHA256SUMS.txt) hashes for every shipped file
+- CI (.github/workflows/ci.yml) runs scripts/check_release.py (doc pointers, license-forbidden shader paths, link check)
+
+Not claimed:
+
+- an NVIDIA partnership, endorsement, or official DLSS 5 installer
+- that this git clone contains the official 
+vngx_dlss*.dll binaries (they ship in the release 7-Zip)
+- anti-cheat safety or online-game compatibility
+- Frame Generation from the Feeder/Swapper neural-rendering path (this pack targets DLAA + DLSS 5 Neural Rendering)
 
 ## 🙏 Credits & licenses
 
