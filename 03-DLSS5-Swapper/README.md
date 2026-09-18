@@ -17,11 +17,11 @@
 
 ## Install
 
-- Run `DLSS5-Swapper-Setup-1.1.1.exe` (start-menu/desktop shortcuts, clean uninstall).
+- Run `DLSS5-Swapper-Setup-2.2.7.exe` (start-menu/desktop shortcuts, clean uninstall).
   A portable build also exists on the release page if you prefer no installation.
 - **SmartScreen** will warn — the build is not code-signed. **More info → Run anyway.**
 - Games under `Program Files` need the app run **as administrator** (it checks before touching anything).
-- The app makes **zero network requests** — everything ships inside the executable.
+- The app **auto-updates itself** at launch when a new release exists — you don't need to re-download the pack to stay current.
 
 ## Requirements & limits
 
@@ -32,4 +32,4 @@
 ## Sources
 
 - github.com/rakanki911/DLSS5-Swapper · Nexus mirror: nexusmods.com/site/mods/2228 · MIT
-- Backed up here at v1.1.1 for convenience — check the author's releases for updates.
+- Backed up here at v2.2.7 for convenience — the app auto-updates itself, so this stays current.

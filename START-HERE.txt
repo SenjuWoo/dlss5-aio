@@ -7,7 +7,7 @@ You downloaded the all-in-one DLSS 5 pack. Full docs: README.md in this folder
 WHICH SITUATION ARE YOU IN?
 ---------------------------
 1) Game ALREADY has DLSS (a nvngx_dlss.dll exists) and is DirectX 12
-   -> Run: 03-DLSS5-Swapper\DLSS5-Swapper-Setup-1.1.1.exe
+   -> Run: 03-DLSS5-Swapper\DLSS5-Swapper-Setup-2.2.7.exe
       Drop the game folder onto it. Done. (SmartScreen: More info -> Run anyway)
 
 2) Game has NO DLSS and is 64-BIT (D3D11/D3D12/Vulkan)

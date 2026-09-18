@@ -27,7 +27,7 @@
 | `feed-vk-layer.zip` | Vulkan interop fallback — **only if a Vulkan game's log asks for it** | Vulkan |
 | `host64\` | The complete 64-bit helper environment for 32-bit games | **32-bit** games |
 
-### The bundled `reshade-shaders\` folder (v1.2.4)
+### The bundled `reshade-shaders\` folder (v1.3.0)
 
 Everything ReShade needs to **compile and run the feeder out of the box**, in ReShade's own
 folder layout — copy the whole folder next to the game exe (or merge into an existing

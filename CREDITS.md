@@ -18,7 +18,7 @@ the pack is an assembly, a backup, and a convenience layer.
 
 | Component | Version | Author / source | License |
 |---|---|---|---|
-| **DLSS5-Swapper** (`DLSS5-Swapper-Setup-1.1.1.exe`) | 1.1.1 | Rakan Alkhaldi — github.com/rakanki911/DLSS5-Swapper · Nexus: nexusmods.com/site/mods/2228 | MIT |
+| **DLSS5-Swapper** (`DLSS5-Swapper-Setup-2.2.7.exe`) | 2.2.7 | Rakan Alkhaldi — github.com/rakanki911/DLSS5-Swapper · Nexus: nexusmods.com/site/mods/2228 | MIT |
 | **DLSS5-Feeder** (`dlss5-feed.addon64`, `dlss5-feed.addon32`, `DLSS5_Feed.fx`, `feed-vk-layer.zip`, `dlss5-feed-host64.exe`) | v0.6.0-beta.1 | jlrouzies-fr — github.com/jlrouzies-fr/DLSS5-Feeder | not declared on repo; distributed by author via GitHub Releases |
 | **`renodx-dlss5.addon64`** (DLSS 5 ReShade add-on) | 0.2026.827.2036 | RenoDX community (Discord) | closed source, community-distributed |
 | **`nvngx_dlssnr.dll`** (neural-rendering runtime) | 310.8.0 | NVIDIA production build, *custom-compiled by the RenoDX author* per DLSS5-Swapper README (adds RTX 40/50 support) | NVIDIA proprietary |
