@@ -34,13 +34,13 @@
 
 | | |
 | --- | --- |
-| **Latest release** | [v1.2.5](https://github.com/ShugokiFable/dlss5-aio/releases/tag/v1.2.5) (docs-only over v1.2.4; binaries identical) |
+| **Latest release** | [v1.3.0](https://github.com/SenjuWoo/dlss5-aio/releases/tag/v1.3.0) (Swapper 1.1.1 → 2.2.7) |
 | **Official NVIDIA DLSS DLLs** | **310.7.129** — Super Resolution, Frame Generation, Ray Reconstruction (documented in [`01-Official-NVIDIA-DLLs/README.md`](01-Official-NVIDIA-DLLs/README.md); signed production builds in the release 7-Zip, hashed in [`SHA256SUMS.txt`](SHA256SUMS.txt)) |
 | **DLSS 5 neural-rendering runtime** | `nvngx_dlssnr.dll` **310.8.0** (RenoDX community build; documented in [`02-DLSS5-Neural-Rendering/README.md`](02-DLSS5-Neural-Rendering/README.md)) |
-| **Tools** | DLSS5-Swapper **1.1.1** · DLSS5-Feeder **v0.6.0-beta.1** |
+| **Tools** | DLSS5-Swapper **2.2.7** · DLSS5-Feeder **v0.6.0-beta.1** |
 | **Needs** | NVIDIA GPU · Windows 10/11 64-bit · **RTX 40/50** for DLSS 5 neural rendering |
 
-Download: [github.com/ShugokiFable/dlss5-aio/releases/latest](https://github.com/ShugokiFable/dlss5-aio/releases/latest). It is a 3-part 7-Zip (~635 MB total): download **all 3 parts** into one folder, right-click part `.001`, **Extract Here** (7-Zip), then open **`START-HERE.txt`**. This git clone is the docs + scripts tree — the large official DLLs live in the release archive, not in git.
+Download: [github.com/SenjuWoo/dlss5-aio/releases/latest](https://github.com/SenjuWoo/dlss5-aio/releases/latest). It is a 3-part 7-Zip (~635 MB total): download **all 3 parts** into one folder, right-click part `.001`, **Extract Here** (7-Zip), then open **`START-HERE.txt`**. This git clone is the docs + scripts tree — the large official DLLs live in the release archive, not in git.
 
 **What is DLSS 5?** NVIDIA's next-generation neural-rendering upscaler — announced at GTC in March 2026 and planned for a full release in fall 2026. Its runtimes are already circulating, and the community has built tools that make it work in **any** game: with or without built-in DLSS, 64-bit or 32-bit, DirectX 11/12, Vulkan, even DirectX 9.
 
@@ -74,7 +74,7 @@ DLSS5-AIO/
 │   ├── nvngx_dlssnr.dll  310.8.0     Neural-rendering runtime (RenoDX build, RTX 40/50)
 │   └── renodx-dlss5.addon64 0.2026.827.2036   DLSS 5 ReShade add-on (RenoDX)
 ├── 03-DLSS5-Swapper/                 ← one-click DLSS 5 for DX12 games that have DLSS
-│   └── DLSS5-Swapper-Setup-1.1.1.exe
+│   └── DLSS5-Swapper-Setup-2.2.7.exe
 ├── 04-DLSS5-Feeder/                  ← DLSS 5 for games with NO DLSS
 │   ├── dlss5-feed.addon64            64-bit games
 │   ├── dlss5-feed.addon32            32-bit games
@@ -111,7 +111,7 @@ DLSS5-AIO/
 
 ### Scenario 1 — Game has DLSS, DirectX 12 → DLSS5-Swapper (easiest)
 
-1. Run `03-DLSS5-Swapper\DLSS5-Swapper-Setup-1.1.1.exe` and install it.
+1. Run `03-DLSS5-Swapper\DLSS5-Swapper-Setup-2.2.7.exe` and install it.
 2. SmartScreen will warn ("Windows protected your PC") — the build isn't code-signed. Click **More info → Run anyway**.
 3. Launch **DLSS 5 Swapper**, drop the **game folder** onto it.
 4. It finds the game exe, works out the API, upgrades every DLSS/Streamline DLL it finds (including the ones Unreal hides under `Engine\Binaries\ThirdParty\NVIDIA\NGX\Win64`), places `renodx-dlss5.addon64` + `nvngx_dlssnr.dll` next to the exe, and installs ReShade (add-on build) silently.
@@ -174,7 +174,7 @@ See `05-Legacy-Optiscaler-DLSS-Enabler\README.md`. **One approach per game — n
 
 **Nothing happens, no `dlss5-feed.log`?** Architecture mismatch — a 64-bit `dxgi.dll` can't load into a 32-bit game and vice versa. Check which ReShade build you installed.
 
-**Does it touch my system or go online?** The Swapper makes zero network requests. Nothing here installs drivers. Everything runs from the game folder.
+**Does it touch my system or go online?** The Swapper 2.x auto-updates itself (one silent check at launch). Nothing here installs drivers. Everything runs from the game folder.
 
 **Is it safe for multiplayer / anti-cheat games?** Not guaranteed — ReShade add-ons, NGX hooking and DLL injection can trigger anti-cheat (BDO, Warframe, APB Reloaded, …). The owner saw BDO warn over similar DLSS injection software. "Technically compatible" ≠ "safe on an online account" — keep this to offline/single-player titles.
 
@@ -239,7 +239,7 @@ vngx_dlss*.dll binaries (they ship in the release 7-Zip)
 
 - **[NVIDIA](https://www.nvidia.com/en-us/geforce/technologies/dlss/)** — DLSS 5, official DLSS/Streamline DLLs (see Streamline folder for NIS/Reflex licenses)
 - **[jlrouzies-fr](https://github.com/jlrouzies-fr/DLSS5-Feeder)** — DLSS5-Feeder v0.6.0-beta.1
-- **[Rakan Alkhaldi (rakanki911)](https://github.com/rakanki911/DLSS5-Swapper)** — DLSS5-Swapper 1.1.1, MIT
+- **[Rakan Alkhaldi (rakanki911)](https://github.com/rakanki911/DLSS5-Swapper)** — DLSS5-Swapper 2.2.7, MIT
 - **[RenoDX (clshortfuse)](https://github.com/clshortfuse/renodx)** — `renodx-dlss5.addon64` + custom `nvngx_dlssnr.dll` (RTX 40/50)
 - **[crosire](https://github.com/crosire/reshade)** — ReShade 6.8.0 (BSD-3-Clause)
 - **[umar-afzaal](https://github.com/umar-afzaal/LumeniteFX)** — LumeniteFX motion vectors (Kernel + QuantMotion): linked, not bundled (AGNYA license forbids redistribution)
