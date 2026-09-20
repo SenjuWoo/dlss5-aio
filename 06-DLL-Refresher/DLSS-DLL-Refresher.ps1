@@ -45,10 +45,20 @@ $script:SkipPath = @('_dlss_originals', '_DLSS5_Backup', 'dlss5-backup', 'DLSS-B
 function Get-NumVersion {
     param([string]$s)
     if (-not $s) { return $null }
-    $t = $s -replace ',', '.'            # 310,9,1,0 -> 310.9.1.0
-    $m = [regex]::Match($t, '^\d+(\.\d+)*')
-    if (-not $m.Success) { return $null }
-    try { return [version]$m.Value } catch { return $null }
+    if ($s -notmatch '\d') { return $null }   # no digits at all -> unreadable, caller skips
+    # Count EVERY segment; a build tag is 0, not a full stop:
+    #   310,9,1,0  -> 310.9.1.0
+    #   310.8.SF.0 -> 310.8.0.0  (same release line as 310,8,0,0 - the hash decides between builds)
+    # Stopping at 'SF' used to make the production build look OLDER than the community one.
+    $parts = @()
+    foreach ($seg in ($s -split '[,.]')) {
+        $n = 0
+        if ($seg -match '^\d+$') { $n = [int]$seg }
+        $parts += $n
+        if ($parts.Count -eq 4) { break }
+    }
+    while ($parts.Count -lt 4) { $parts += 0 }
+    try { return [version]($parts -join '.') } catch { return $null }
 }
 
 function Get-PEMachine {
@@ -274,6 +284,12 @@ function Invoke-SelfTest {
     Assert ((Get-Sha (Join-Path $mod $name)) -eq $src.Sha) 'apply: file now matches the official build'
     Assert (Test-Path -LiteralPath (Join-Path $mod '_dlss_originals\nvngx_dlss.dll')) 'apply: original was backed up'
     Assert ((Get-Sha (Join-Path $x86 $name)) -ne $src.Sha) 'apply: 32-bit file untouched'
+
+    # version parsing: a build tag must not make a release line look newer/older than it is
+    Assert ((Get-NumVersion '310.8.SF.0') -eq (Get-NumVersion '310,8,0,0')) 'build-tagged version equals its numeric form'
+    Assert ((Get-NumVersion '310.8.SF.0') -lt (Get-NumVersion '310.9.1.0')) 'build-tagged version sorts below a newer release'
+    Assert ((Get-NumVersion '310,9,1,0') -gt (Get-NumVersion '310.7.129.0')) 'numeric versions sort correctly'
+    Assert ($null -eq (Get-NumVersion 'not-a-version')) 'unreadable version returns null'
     $script:Apply = $false
 
     Invoke-Restore -roots @($fix) | Out-Null
