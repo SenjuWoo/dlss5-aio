@@ -65,6 +65,8 @@ echo "== C. launcher under cmd.exe =="
 IN="$FIX/in.txt"; printf '0\n' > "$IN"
 BOUT=$(MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' timeout 120 cmd.exe /c "$(W "$LAUNCH")" < "$IN" 2>&1 | tr -d '\r')
 echo "$BOUT" | grep -q "nvngx_dlssnr.dll): included" && ok "menu renders (NR state line)" || bad "menu did not render"
+echo "$BOUT" | grep -q "\[7\]  Include online games" && ok "menu renders the online-games option" || bad "menu option 7 missing"
+echo "$BOUT" | grep -q "Online games (kernel anti-cheat):" && ok "menu shows the online state line" || bad "online state line missing"
 echo "$BOUT" | grep -qE "was unexpected|syntax of the command is incorrect" && bad "cmd syntax error" || ok "no cmd syntax error"
 BOUT=$(MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' timeout 240 cmd.exe /c "$(W "$LAUNCH")" -SelfTest 2>&1 | tr -d '\r')
 echo "$BOUT" | grep -q "SELF TEST PASSED" && ok "arguments forwarded to the tool" || bad "argument passthrough failed"
