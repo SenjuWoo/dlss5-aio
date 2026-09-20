@@ -13,9 +13,9 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/ShugokiFable/dlss5-aio/actions/workflows/ci.yml"><img src="https://github.com/ShugokiFable/dlss5-aio/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/SenjuWoo/dlss5-aio/actions/workflows/ci.yml"><img src="https://github.com/SenjuWoo/dlss5-aio/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-8fa3b8?labelColor=0b1016" alt="MIT License"></a>
-  <a href="https://github.com/ShugokiFable/dlss5-aio/releases/tag/v1.2.5"><img src="https://img.shields.io/badge/release-v1.2.5-6b8cae?labelColor=0b1016" alt="v1.2.5"></a>
+  <a href="https://github.com/SenjuWoo/dlss5-aio/releases/tag/v1.3.1"><img src="https://img.shields.io/badge/release-v1.3.1-6b8cae?labelColor=0b1016" alt="v1.3.1"></a>
 </p>
 
 <p align="center">
@@ -34,9 +34,9 @@
 
 | | |
 | --- | --- |
-| **Latest release** | [v1.3.0](https://github.com/SenjuWoo/dlss5-aio/releases/tag/v1.3.0) (Swapper 1.1.1 → 2.2.7) |
-| **Official NVIDIA DLSS DLLs** | **310.7.129** — Super Resolution, Frame Generation, Ray Reconstruction (documented in [`01-Official-NVIDIA-DLLs/README.md`](01-Official-NVIDIA-DLLs/README.md); signed production builds in the release 7-Zip, hashed in [`SHA256SUMS.txt`](SHA256SUMS.txt)) |
-| **DLSS 5 neural-rendering runtime** | `nvngx_dlssnr.dll` **310.8.0** (RenoDX community build; documented in [`02-DLSS5-Neural-Rendering/README.md`](02-DLSS5-Neural-Rendering/README.md)) |
+| **Latest release** | [v1.3.1](https://github.com/SenjuWoo/dlss5-aio/releases/tag/v1.3.1) (DLSS DLLs 310.7.129 → 310.9.1.0; DLSSNR → 310.8.SF.0) |
+| **Official NVIDIA DLSS DLLs** | **310.9.1.0** — Super Resolution, Frame Generation, Ray Reconstruction (documented in [`01-Official-NVIDIA-DLLs/README.md`](01-Official-NVIDIA-DLLs/README.md); signed production builds in the release 7-Zip, hashed in [`SHA256SUMS.txt`](SHA256SUMS.txt)) |
+| **DLSS 5 neural-rendering runtime** | `nvngx_dlssnr.dll` **310.8.SF.0** (NVIDIA production build, unsigned; documented in [`02-DLSS5-Neural-Rendering/README.md`](02-DLSS5-Neural-Rendering/README.md)) |
 | **Tools** | DLSS5-Swapper **2.2.7** · DLSS5-Feeder **v0.6.0-beta.1** |
 | **Needs** | NVIDIA GPU · Windows 10/11 64-bit · **RTX 40/50** for DLSS 5 neural rendering |
 
@@ -66,12 +66,12 @@ This git tree has no app screenshot. Swapper is a third-party installer; Feeder 
 ```
 DLSS5-AIO/
 ├── 01-Official-NVIDIA-DLLs/          ← the official latest DLSS DLLs
-│   ├── nvngx_dlss.dll   310.7.129    Super Resolution
-│   ├── nvngx_dlssg.dll  310.7.129    Frame Generation
-│   ├── nvngx_dlssd.dll  310.7.129    Ray Reconstruction
+│   ├── nvngx_dlss.dll   310.9.1.0   Super Resolution
+│   ├── nvngx_dlssg.dll  310.9.1.0   Frame Generation
+│   ├── nvngx_dlssd.dll  310.9.1.0   Ray Reconstruction
 │   └── Streamline-2.13.0/            sl.*.dll set (NVIDIA Streamline 2.13.0)
-├── 02-DLSS5-Neural-Rendering/        ← the DLSS 5 heart (community-circulated)
-│   ├── nvngx_dlssnr.dll  310.8.0     Neural-rendering runtime (RenoDX build, RTX 40/50)
+├── 02-DLSS5-Neural-Rendering/        ← the DLSS 5 heart (production build)
+│   ├── nvngx_dlssnr.dll  310.8.SF.0  Neural-rendering runtime (production build, RTX 40/50)
 │   └── renodx-dlss5.addon64 0.2026.827.2036   DLSS 5 ReShade add-on (RenoDX)
 ├── 03-DLSS5-Swapper/                 ← one-click DLSS 5 for DX12 games that have DLSS
 │   └── DLSS5-Swapper-Setup-2.2.7.exe
@@ -162,7 +162,7 @@ See `05-Legacy-Optiscaler-DLSS-Enabler\README.md`. **One approach per game — n
 
 ## ❓ FAQ
 
-**Is this official?** The `01` DLLs are genuine NVIDIA production builds (signed, "DVS PRODUCTION"). DLSS 5 itself is official NVIDIA tech, but its runtime here is an early community-circulated build, and the RenoDX add-on is community software. It's beta-grade: expect some temporal softness in fast motion (estimated motion vectors, not the game's real ones).
+**Is this official?** The `01` DLLs are genuine NVIDIA production builds (signed, "DVS PRODUCTION"). DLSS 5 itself is official NVIDIA tech; the runtime here is the NVIDIA DLSSNR production build (`310.8.SF.0`, unsigned), and the RenoDX add-on is community software. It's beta-grade: expect some temporal softness in fast motion (estimated motion vectors, not the game's real ones).
 
 **Do I need both tools?** No — per game, one or the other: Swapper if the game has DLSS, Feeder if it doesn't. Both need the `02` pieces (the Swapper embeds its own copies; the Feeder reads them from `host64\`).
 
@@ -202,7 +202,7 @@ Only if you still get `Available=0` with the DLLs confirmed present AND a same-d
 
 ## 🔄 Keeping it updated
 
-- **Official DLSS DLLs:** watch TechPowerUp / TechSpot "NVIDIA DLSS DLL" pages, or the NVIDIA/DLSS GitHub SDK releases. Version shown here: 310.7.129 (SR/FG/RR), Streamline 2.13.0.
+- **Official DLSS DLLs:** watch TechPowerUp / TechSpot "NVIDIA DLSS DLL" pages, or the NVIDIA/DLSS GitHub SDK releases. Version shown here: 310.9.1.0 (SR/FG/RR), Streamline 2.13.0.
 - **DLSS5-Swapper:** github.com/rakanki911/DLSS5-Swapper/releases (also on Nexus: site/mods/2228).
 - **DLSS5-Feeder:** github.com/jlrouzies-fr/DLSS5-Feeder/releases (also on Nexus: site/mods/2228's sibling pages — search "DLSS 5 Feeder").
 - **DLSS 5 add-on / runtime:** RenoDX Discord / github.com/RankFTW/RHI (RHI auto-downloads and keeps them updated).
@@ -222,8 +222,8 @@ sha256sum -c SHA256SUMS.txt
 
 Verified in this tree:
 
-- latest GitHub release **v1.2.5** (docs-only over v1.2.4; binaries identical)
-- documented official DLL versions **310.7.129** (SR/FG/RR) and neural runtime **310.8.0** in folder READMEs
+- latest GitHub release **v1.3.1** (DLSS DLLs 310.9.1.0, DLSSNR 310.8.SF.0, Swapper 2.2.7)
+- documented official DLL versions **310.9.1.0** (SR/FG/RR) and neural runtime **310.8.SF.0** in folder READMEs
 - [SHA256SUMS.txt](SHA256SUMS.txt) hashes for every shipped file
 - CI (.github/workflows/ci.yml) runs scripts/check_release.py (doc pointers, license-forbidden shader paths, link check)
 
@@ -240,7 +240,7 @@ vngx_dlss*.dll binaries (they ship in the release 7-Zip)
 - **[NVIDIA](https://www.nvidia.com/en-us/geforce/technologies/dlss/)** — DLSS 5, official DLSS/Streamline DLLs (see Streamline folder for NIS/Reflex licenses)
 - **[jlrouzies-fr](https://github.com/jlrouzies-fr/DLSS5-Feeder)** — DLSS5-Feeder v0.6.0-beta.1
 - **[Rakan Alkhaldi (rakanki911)](https://github.com/rakanki911/DLSS5-Swapper)** — DLSS5-Swapper 2.2.7, MIT
-- **[RenoDX (clshortfuse)](https://github.com/clshortfuse/renodx)** — `renodx-dlss5.addon64` + custom `nvngx_dlssnr.dll` (RTX 40/50)
+- **[RenoDX (clshortfuse)](https://github.com/clshortfuse/renodx)** — `renodx-dlss5.addon64` + `nvngx_dlssnr.dll` production build (RTX 40/50)
 - **[crosire](https://github.com/crosire/reshade)** — ReShade 6.8.0 (BSD-3-Clause)
 - **[umar-afzaal](https://github.com/umar-afzaal/LumeniteFX)** — LumeniteFX motion vectors (Kernel + QuantMotion): linked, not bundled (AGNYA license forbids redistribution)
 - **[MartysMods / iMMERSE (Pascal Gilcher)](https://github.com/martymcmodding/iMMERSE)** — motion-vector provider: linked, not bundled (license forbids public propagation)

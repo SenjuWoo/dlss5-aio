@@ -5,9 +5,9 @@ DLSS files to bring it up to date — the most common, safest DLSS upgrade there
 
 | File | Version | What it is | What it does |
 |---|---|---|---|
-| `nvngx_dlss.dll` | **310.7.129** | DLSS Super Resolution | Upscaling + quality presets (transformer model) |
-| `nvngx_dlssg.dll` | **310.7.129** | DLSS Frame Generation | AI frame interpolation (needs RTX 40+ to actually generate frames) |
-| `nvngx_dlssd.dll` | **310.7.129** | DLSS Ray Reconstruction | Denoises ray-traced lighting |
+| `nvngx_dlss.dll` | **310.9.1.0** | DLSS Super Resolution | Upscaling + quality presets (transformer model) |
+| `nvngx_dlssg.dll` | **310.9.1.0** | DLSS Frame Generation | AI frame interpolation (needs RTX 40+ to actually generate frames) |
+| `nvngx_dlssd.dll` | **310.9.1.0** | DLSS Ray Reconstruction | Denoises ray-traced lighting |
 | `Streamline-2.13.0\sl.*.dll` | **2.13.0** | NVIDIA Streamline | Runtime used by newer games (Cyberpunk 2077, Alan Wake 2, …) to load DLSS |
 
 ## How to update a game

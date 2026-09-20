@@ -4,7 +4,7 @@
 
 | File | Version | What it is |
 |---|---|---|
-| `nvngx_dlssnr.dll` | **310.8.0** | NVIDIA DLSS **Neural Rendering** runtime (DLSSNR). This is the early/community-circulated build, custom-compiled by the RenoDX author to add **RTX 40 and 50 series** support. |
+| `nvngx_dlssnr.dll` | **310.8.SF.0** | NVIDIA DLSS **Neural Rendering** runtime (DLSSNR) — the **production** build (reports as `NVIDIA DLSSNR — DVS PRODUCTION`), superseding the earlier community build. Ships **unsigned** (verified: no Authenticode signature), so treat it as beta-grade. |
 | `renodx-dlss5.addon64` | **0.2026.827.2036** | The **DLSS 5 ReShade add-on** (RenoDX community). Hooks DLSS evaluate calls and injects the neural pass. |
 
 ## Where these files are needed
@@ -20,6 +20,6 @@
 - This is **community-distributed, beta-grade** NVIDIA technology. DLSS 5 was announced at GTC
   (March 2026) with a full release planned for fall 2026 — expect newer official builds later.
 - The add-on is built against **ReShade API 18**; ReShade ≥ 6.8 with add-on support required.
-- GPU requirements: RTX 40/50 for the neural rendering features (per the RenoDX build).
+- GPU requirements: RTX 40/50 for the neural rendering features.
 - Fresh copies can be obtained from the **RenoDX Discord**, or auto-managed by **RHI**
   (github.com/RankFTW/RHI), which downloads and updates both files per game.

@@ -8,9 +8,9 @@ the pack is an assembly, a backup, and a convenience layer.
 
 | Component | Version | Source |
 |---|---|---|
-| `nvngx_dlss.dll` (Super Resolution) | 310.7.129 | NVIDIA DLSS SDK / game-ready builds — also mirrored on TechPowerUp ("NVIDIA DLSS DLL"), TechSpot (310.7.129) |
-| `nvngx_dlssg.dll` (Frame Generation) | 310.7.129 | NVIDIA DLSS SDK (github.com/NVIDIA/DLSS, v310.7.0 SDK) |
-| `nvngx_dlssd.dll` (Ray Reconstruction) | 310.7.129 | NVIDIA DLSS SDK |
+| `nvngx_dlss.dll` (Super Resolution) | 310.9.1.0 | NVIDIA DLSS SDK / game-ready builds — also mirrored on TechPowerUp ("NVIDIA DLSS DLL"). NVIDIA-signed (verified) |
+| `nvngx_dlssg.dll` (Frame Generation) | 310.9.1.0 | NVIDIA DLSS SDK (github.com/NVIDIA/DLSS). NVIDIA-signed (verified) |
+| `nvngx_dlssd.dll` (Ray Reconstruction) | 310.9.1.0 | NVIDIA DLSS SDK. NVIDIA-signed (verified) |
 | Streamline `sl.*.dll` set | 2.13.0 | NVIDIA Streamline SDK — `nis.license.txt` / `reflex.license.txt` included |
 | DLSS 5 (neural rendering) | — | NVIDIA, announced GTC March 2026, public release planned fall 2026 |
 
@@ -21,7 +21,7 @@ the pack is an assembly, a backup, and a convenience layer.
 | **DLSS5-Swapper** (`DLSS5-Swapper-Setup-2.2.7.exe`) | 2.2.7 | Rakan Alkhaldi — github.com/rakanki911/DLSS5-Swapper · Nexus: nexusmods.com/site/mods/2228 | MIT |
 | **DLSS5-Feeder** (`dlss5-feed.addon64`, `dlss5-feed.addon32`, `DLSS5_Feed.fx`, `feed-vk-layer.zip`, `dlss5-feed-host64.exe`) | v0.6.0-beta.1 | jlrouzies-fr — github.com/jlrouzies-fr/DLSS5-Feeder | not declared on repo; distributed by author via GitHub Releases |
 | **`renodx-dlss5.addon64`** (DLSS 5 ReShade add-on) | 0.2026.827.2036 | RenoDX community (Discord) | closed source, community-distributed |
-| **`nvngx_dlssnr.dll`** (neural-rendering runtime) | 310.8.0 | NVIDIA production build, *custom-compiled by the RenoDX author* per DLSS5-Swapper README (adds RTX 40/50 support) | NVIDIA proprietary |
+| **`nvngx_dlssnr.dll`** (neural-rendering runtime) | 310.8.SF.0 | NVIDIA DLSSNR **production** build (`DVS PRODUCTION`), superseding the earlier RenoDX community build; ships unsigned (verified) | NVIDIA proprietary |
 | **ReShade** (`dxgi.dll` in `host64\`) | 6.8.0 (add-on build) | crosire — reshade.me | BSD-3-Clause |
 | **RHI** (DLSS 5 deployment tool) | — | RankFTW — github.com/RankFTW/RHI | linked, not bundled |
 | **LumeniteFX** (motion-vector provider, recommended) | — | Umar Afzaal — github.com/umar-afzaal/LumeniteFX | **linked, not bundled** (no redistribution-friendly license; download from its repo) |
