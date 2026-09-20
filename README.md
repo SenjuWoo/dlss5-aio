@@ -15,7 +15,7 @@
 <p align="center">
   <a href="https://github.com/SenjuWoo/dlss5-aio/actions/workflows/ci.yml"><img src="https://github.com/SenjuWoo/dlss5-aio/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-8fa3b8?labelColor=0b1016" alt="MIT License"></a>
-  <a href="https://github.com/SenjuWoo/dlss5-aio/releases/tag/v1.3.1"><img src="https://img.shields.io/badge/release-v1.3.1-6b8cae?labelColor=0b1016" alt="v1.3.1"></a>
+  <a href="https://github.com/SenjuWoo/dlss5-aio/releases/tag/v1.4.0"><img src="https://img.shields.io/badge/release-v1.4.0-6b8cae?labelColor=0b1016" alt="v1.4.0"></a>
 </p>
 
 <p align="center">
@@ -34,7 +34,7 @@
 
 | | |
 | --- | --- |
-| **Latest release** | [v1.3.1](https://github.com/SenjuWoo/dlss5-aio/releases/tag/v1.3.1) (DLSS DLLs 310.7.129 → 310.9.1.0; DLSSNR → 310.8.SF.0) |
+| **Latest release** | [v1.4.0](https://github.com/SenjuWoo/dlss5-aio/releases/tag/v1.4.0) (adds folder 06 — whole-PC DLL refresher) |
 | **Official NVIDIA DLSS DLLs** | **310.9.1.0** — Super Resolution, Frame Generation, Ray Reconstruction (documented in [`01-Official-NVIDIA-DLLs/README.md`](01-Official-NVIDIA-DLLs/README.md); signed production builds in the release 7-Zip, hashed in [`SHA256SUMS.txt`](SHA256SUMS.txt)) |
 | **DLSS 5 neural-rendering runtime** | `nvngx_dlssnr.dll` **310.8.SF.0** (NVIDIA production build, unsigned; documented in [`02-DLSS5-Neural-Rendering/README.md`](02-DLSS5-Neural-Rendering/README.md)) |
 | **Tools** | DLSS5-Swapper **2.2.7** · DLSS5-Feeder **v0.6.0-beta.1** |
@@ -56,6 +56,7 @@ This git tree has no app screenshot. Swapper is a third-party installer; Feeder 
 | **3** | Game has **no DLSS**, is **32-bit** (or DirectX 9) | **DLSS5-Feeder** 32-bit install — `dlss5-feed.addon32` + the `host64\` folder | `04-DLSS5-Feeder` |
 | **4** | Just want the **latest official DLSS DLLs** in games that already support DLSS | Copy the DLLs from `01` over the game folder | `01-Official-NVIDIA-DLLs` |
 | **5** | Prefer the **old-school conversion route** (FSR/XeSS frame gen on any GPU, non-RTX) | OptiScaler / DLSS Enabler — **pick ONE approach per game, never mix** | `05-Legacy-Optiscaler-DLSS-Enabler` |
+| **6** | Want the newest DLSS DLLs in **every** game/app on the PC — **no DLSS 5, nothing injected** (anti-cheat-safe) | **DLL Refresher** — scans the whole PC, swaps only NVIDIA's own runtime files, keeps backups | `06-DLL-Refresher` |
 
 **Scenario 3 is the magic one this pack is built around:** NGX and the DLSS 5 add-on are 64-bit-only, so for a 32-bit game you drop the tiny 32-bit `dlss5-feed.addon32` next to the game exe *and* the complete `host64\` folder beside it. The add-on ships frames to the bundled 64-bit helper process, which does all the real DLSS 5 work GPU-to-GPU. Proven in practice: **Saints Row: The Third (32-bit) — 1440p DLAA, 99,000+ frames evaluated** (log from the pack owner's session, see `04-DLSS5-Feeder/README.md`).
 
@@ -87,9 +88,12 @@ DLSS5-AIO/
 │       ├── dxgi.dll                  ReShade 6.8.0 (64-bit, add-on build)
 │       ├── renodx-dlss5.addon64 + nvngx_dlssnr.dll + nvngx_dlss*.dll + sl.*.dll
 │       └── ReShade.ini               pre-tuned DLSS 5 defaults (sanitized)
-└── 05-Legacy-Optiscaler-DLSS-Enabler/ ← the old way (kept for reference)
-    ├── Optiscaler/                   OptiScaler (upscaler/frame-gen bridge)
-    └── dlss-enabler-setup_0.9.4-…exe DLSS Enabler
+├── 05-Legacy-Optiscaler-DLSS-Enabler/ ← the old way (kept for reference)
+│   ├── Optiscaler/                   OptiScaler (upscaler/frame-gen bridge)
+│   └── dlss-enabler-setup_0.9.4-…exe DLSS Enabler
+└── 06-DLL-Refresher/                 ← swap only, no DLSS 5 (anti-cheat-safe)
+    ├── Refresh-DLSS-DLLs.bat         double-click menu
+    └── DLSS-DLL-Refresher.ps1        whole-PC scan + swap, keeps originals
 ```
 
 *Provenance: this pack restructures the original `!!!DLSS mod` collection — `GOATED NEW` → folders `02` + `04`, `Older` → folder `05` — and adds the official `zofficialdlls` set as folder `01`, plus the missing 64-bit feeder pieces (`dlss5-feed.addon64`, `DLSS5_Feed.fx`, `feed-vk-layer.zip`). The `reshade-shaders` folder is the free-to-share set: feeder shader + ReShade core headers + standard effects (Deband, Levels, LUT, DisplayDepth, Daltonize, UIMask, qUINT_common) — motion-vector providers are *not* bundled (iMMERSE and LumeniteFX licenses forbid redistribution).*
@@ -200,6 +204,31 @@ Only if you still get `Available=0` with the DLLs confirmed present AND a same-d
 
 ---
 
+## 🧭 The DLSS 5 tool landscape — what to use, what overlaps
+
+Five other projects do adjacent jobs. Here is the honest split, so you do not stack
+three tools into one game folder — that is how installs break.
+
+| Tool | What it is good at | Overlaps with this pack? |
+|---|---|---|
+| **[DLSS5-Swapper](https://github.com/rakanki911/DLSS5-Swapper)** (~6k★) | One-click DLSS 5 per game: DX8–12, Vulkan, OpenGL, DirectDraw, emulators; in-game F8 overlay; automatic backups and restore; community results page | **No — it *is* folder `03` of this pack.** Install from here and let it update itself |
+| **[DLSS5-Autopilot](https://github.com/Kizzuwatnaa/DLSS5-Autopilot)** (~700★, MIT) | Scans a whole library (Steam, Epic, GOG, EA, Ubisoft, Battle.net, Rockstar, Xbox, 19 emulators), picks one of eight routes, fetches every part at run time, then reads the logs back and says whether the model actually ran | **Partly** — its *dlss* page updates DLSS per game. Folder `06` here does the same across the **whole disk**, including folders no launcher knows about |
+| **[RHI](https://github.com/RankFTW/RHI)** (~1.6k★, GPL-3.0) | ReShade + HDR management for a library: the right ReShade per game, RenoDX/Luma HDR, OptiScaler, plus a DLSS/Streamline version dropdown per game | **Partly** — per-game DLSS swaps and ReShade deployment. If you use RHI, keep DLSS updates in **one** tool; do not run both on the same game |
+| **[NeuralScreen](https://github.com/perseval-BLR/NeuralScreen)** (~900★) | DLSS 5 NR across the **whole Windows desktop** in real time — games, video, photos — with presets and recording | **No overlap** — desktop-wide, where this pack is per-game |
+| **[dlss5-anywhere](https://github.com/Won-Cafe/dlss5-anywhere)** (MIT) | Installs the NR add-on into **Lossless Scaling** once, so anything LS captures gets neural rendering; game files never touched | **No overlap** — different delivery path |
+
+**What to actually pick**
+
+- **Newest DLSS everywhere, nothing injected** → folder `06` (this pack). Anti-cheat sees a plain NVIDIA runtime file, the same thing a driver update does.
+- **DLSS 5 in one game, GUI + undo button** → DLSS5-Swapper (folder `03`).
+- **DLSS 5 across a big library, hands-off, self-checking** → DLSS5-Autopilot — the only one that verifies its own work afterwards.
+- **HDR + ReShade + version management in one window** → RHI.
+- **Neural rendering on video, browsers, emulators or the desktop itself** → NeuralScreen (desktop-wide) or dlss5-anywhere (Lossless Scaling).
+
+**Anti-cheat reality check.** Anything that *injects* — the ReShade add-on, OptiScaler's proxy DLLs, the feeder's layer — is what anti-cheat systems flag. Folder `06` is the only part of this pack that touches nothing but NVIDIA's own files, which is exactly why it exists. Never inject into a game with kernel-level anti-cheat, and treat "it worked offline" as no evidence at all for an online game.
+
+---
+
 ## 🔄 Keeping it updated
 
 - **Official DLSS DLLs:** watch TechPowerUp / TechSpot "NVIDIA DLSS DLL" pages, or the NVIDIA/DLSS GitHub SDK releases. Version shown here: 310.9.1.0 (SR/FG/RR), Streamline 2.13.0.
@@ -222,7 +251,7 @@ sha256sum -c SHA256SUMS.txt
 
 Verified in this tree:
 
-- latest GitHub release **v1.3.1** (DLSS DLLs 310.9.1.0, DLSSNR 310.8.SF.0, Swapper 2.2.7)
+- latest GitHub release **v1.4.0** (adds folder `06` DLL refresher; DLSS 310.9.1.0, DLSSNR 310.8.SF.0, Swapper 2.2.7)
 - documented official DLL versions **310.9.1.0** (SR/FG/RR) and neural runtime **310.8.SF.0** in folder READMEs
 - [SHA256SUMS.txt](SHA256SUMS.txt) hashes for every shipped file
 - CI (.github/workflows/ci.yml) runs scripts/check_release.py (doc pointers, license-forbidden shader paths, link check)
