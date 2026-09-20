@@ -1,22 +1,37 @@
-# 06 - DLL Refresher (swap only, no DLSS 5)
+# 06 - DLL Refresher (swap only, no DLSS 5 install)
 
-**Every DLSS file on the PC, brought up to date - without installing DLSS 5.**
+**Every DLSS file on the PC, brought up to date - without installing anything.**
 
 DLSS5-Swapper's newer versions install the whole DLSS 5 pipeline. This folder is the
-other half: a plain file swap that only touches NVIDIA's own `nvngx_dlss*.dll`
-runtimes. No injector, no proxy DLL, no ReShade add-on, no hooks - nothing an
-anti-cheat looks for. If you just want the newest DLSS in every game, this is it.
+other half: a plain file swap. No injector, no proxy DLL, no hooks - nothing an
+anti-cheat looks for. If you just want the newest DLSS everywhere, this is it.
+
+It manages **everything DLSS-related the pack ships**, anywhere on the PC:
+
+| Files | Where they come from |
+|---|---|
+| `nvngx_dlss.dll`, `nvngx_dlssg.dll`, `nvngx_dlssd.dll` | `01-Official-NVIDIA-DLLs\` |
+| `sl.common.dll`, `sl.dlss.dll`, `sl.dlss_g.dll`, `sl.dlss_nr.dll`, `sl.interposer.dll`, `sl.nis.dll`, `sl.pcl.dll`, `sl.reflex.dll` (Streamline) | `01-Official-NVIDIA-DLLs\Streamline-*\` |
+| `nvngx_dlssnr.dll`, `renodx-dlss5.addon64` | `02-DLSS5-Neural-Rendering\` |
+| `dlss5-feed.addon64`, `dlss5-feed.addon32`, `DLSS5_Feed.fx` | `04-DLSS5-Feeder\` |
+
+If the pack starts shipping another filename, add it to `$script:Names` in the
+`.ps1` or the tool will not know to look for it.
 
 ## Run it
 
 Double-click **`Refresh-DLSS-DLLs.bat`**.
 
+> **Run it from the extracted pack, not from the source repo.** The repo carries the
+> tool but none of the binaries; the tool now says so instead of failing obscurely.
+> If you keep it elsewhere, point it at the DLLs: `-SourceDir 'D:\DLSS5-AIO\01-Official-NVIDIA-DLLs'`.
+
 | Menu | What it does |
 |---|---|
-| 1 - Scan only | Lists every `nvngx_dlss*.dll` found, its version, and what it would do. Writes nothing. |
+| 1 - Scan only | Lists every managed file found, its version, and what it would do. Writes nothing. |
 | 2 - Update all | Replaces the outdated ones. The original of every file is kept in `_dlss_originals\` next to it. |
 | 3 - Restore | Copies all those originals back. |
-| 4 - Include DLSS 5 runtime | Adds `nvngx_dlssnr.dll` to the scan (only if you actually use DLSS 5). |
+| 4 - Skip DLSS 5 runtime | Drops `nvngx_dlssnr.dll` from the scan. Everything else is always included. |
 | 5 - Scan a single folder | For when you only care about one game folder. |
 | 6 - Self test | Builds a throwaway fixture and proves detect / swap / backup / restore all work. |
 
@@ -27,16 +42,15 @@ Straight from a terminal, if you prefer:
 .\DLSS-DLL-Refresher.ps1 -Roots 'D:\Games'   # report only, one folder
 .\DLSS-DLL-Refresher.ps1 -Apply              # do it
 .\DLSS-DLL-Refresher.ps1 -Restore            # undo
+.\DLSS-DLL-Refresher.ps1 -Apply -SkipNR      # leave the DLSS 5 runtime alone
 .\DLSS-DLL-Refresher.ps1 -Apply -Exclude 'Battlefield 6,MarvelRivals'   # leave online games alone
 ```
 
-On a real library this is what it looks like: **68 DLSS files found, 65 out of date, 3
-already current** - the sort of spread you get from a decade of game folders.
-
 ## What it will and will not touch
 
-- **Replaces** `nvngx_dlss.dll`, `nvngx_dlssg.dll`, `nvngx_dlssd.dll` when the one
-  on disk is older than the pack's copy (or the same version but a different build).
+- **Replaces** any managed file that is older than the pack's copy, or the same
+  version but a different build, or (for version-less files like the `.fx` shader)
+  simply different content.
 - **Leaves alone** anything already identical, anything *newer* than the pack
   (a build you got elsewhere is not downgraded), and anything whose version it
   cannot read - those are listed for you to check by hand.

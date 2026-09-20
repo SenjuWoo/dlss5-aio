@@ -40,11 +40,11 @@ if [ -f "$REAL_OLD" ] && [ -f "$NR" ]; then
     OLD_SHA=$(SHA "$REAL_OLD"); NEW_SHA=$(SHA "$NR")
     mkdir -p "$FIX/stale" "$FIX/current"
     cp "$REAL_OLD" "$FIX/stale/nvngx_dlssnr.dll"; cp "$NR" "$FIX/current/nvngx_dlssnr.dll"
-    OUT=$(RUN -Roots "$(W "$FIX")" -IncludeNR)
+    OUT=$(RUN -Roots "$(W "$FIX")")
     echo "$OUT" | grep -qE "to update: 1" && ok "older build flagged for update" || { bad "older build not flagged"; echo "$OUT" | tail -5; }
     echo "$OUT" | grep -q "newer than the pack" && bad "older build misread as newer" || ok "no bogus 'newer than the pack'"
     echo "$OUT" | grep -q "already current" && ok "current build recognised" || bad "current build not recognised"
-    RUN -Roots "$(W "$FIX")" -IncludeNR -Apply >/dev/null
+    RUN -Roots "$(W "$FIX")" -Apply >/dev/null
     [ "$(SHA "$FIX/stale/nvngx_dlssnr.dll")" = "$NEW_SHA" ] && ok "older build replaced" || bad "not replaced"
     [ -f "$FIX/stale/_dlss_originals/nvngx_dlssnr.dll" ] && [ "$(SHA "$FIX/stale/_dlss_originals/nvngx_dlssnr.dll")" = "$OLD_SHA" ] \
         && ok "original backed up" || bad "original not backed up"
@@ -54,10 +54,17 @@ else
     echo "  SKIP  no real older build on this machine ($REAL_OLD)"
 fi
 
+echo "== B2. source coverage: the pack resolves every managed file =="
+OUT=$(RUN -Roots "$(W "$PACK/01-Official-NVIDIA-DLLs")" 2>&1)
+N=$(echo "$OUT" | grep -c "file(s) will be used as the source of truth")
+echo "$OUT" | grep -qE "sl\.dlss\.dll" && ok "Streamline resolved" || bad "Streamline missing from the source map"
+echo "$OUT" | grep -q "dlss5-feed.addon64" && ok "feeder resolved" || bad "feeder missing from the source map"
+echo "$OUT" | grep -qE "\(1[4-9]|2[0-9]) file\(s\) will be used" && ok "source set is the full managed list" || bad "source set smaller than expected"
+
 echo "== C. launcher under cmd.exe =="
 IN="$FIX/in.txt"; printf '0\n' > "$IN"
 BOUT=$(MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' timeout 120 cmd.exe /c "$(W "$LAUNCH")" < "$IN" 2>&1 | tr -d '\r')
-echo "$BOUT" | grep -q "nvngx_dlssnr.dll): not included" && ok "menu renders (NR state line)" || bad "menu did not render"
+echo "$BOUT" | grep -q "nvngx_dlssnr.dll): included" && ok "menu renders (NR state line)" || bad "menu did not render"
 echo "$BOUT" | grep -qE "was unexpected|syntax of the command is incorrect" && bad "cmd syntax error" || ok "no cmd syntax error"
 BOUT=$(MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' timeout 240 cmd.exe /c "$(W "$LAUNCH")" -SelfTest 2>&1 | tr -d '\r')
 echo "$BOUT" | grep -q "SELF TEST PASSED" && ok "arguments forwarded to the tool" || bad "argument passthrough failed"

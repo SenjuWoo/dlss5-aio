@@ -15,7 +15,7 @@
 <p align="center">
   <a href="https://github.com/SenjuWoo/dlss5-aio/actions/workflows/ci.yml"><img src="https://github.com/SenjuWoo/dlss5-aio/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-8fa3b8?labelColor=0b1016" alt="MIT License"></a>
-  <a href="https://github.com/SenjuWoo/dlss5-aio/releases/tag/v1.4.3"><img src="https://img.shields.io/badge/release-v1.4.3-6b8cae?labelColor=0b1016" alt="v1.4.3"></a>
+  <a href="https://github.com/SenjuWoo/dlss5-aio/releases/tag/v1.4.4"><img src="https://img.shields.io/badge/release-v1.4.4-6b8cae?labelColor=0b1016" alt="v1.4.4"></a>
 </p>
 
 <p align="center">
@@ -34,7 +34,7 @@
 
 | | |
 | --- | --- |
-| **Latest release** | [v1.4.3](https://github.com/SenjuWoo/dlss5-aio/releases/tag/v1.4.3) (adds folder 06 — whole-PC DLL refresher) |
+| **Latest release** | [v1.4.4](https://github.com/SenjuWoo/dlss5-aio/releases/tag/v1.4.4) (adds folder 06 — whole-PC DLL refresher) |
 | **Official NVIDIA DLSS DLLs** | **310.9.1.0** — Super Resolution, Frame Generation, Ray Reconstruction (documented in [`01-Official-NVIDIA-DLLs/README.md`](01-Official-NVIDIA-DLLs/README.md); signed production builds in the release 7-Zip, hashed in [`SHA256SUMS.txt`](SHA256SUMS.txt)) |
 | **DLSS 5 neural-rendering runtime** | `nvngx_dlssnr.dll` **310.8.SF.0** (NVIDIA production build, unsigned; documented in [`02-DLSS5-Neural-Rendering/README.md`](02-DLSS5-Neural-Rendering/README.md)) |
 | **Tools** | DLSS5-Swapper **2.2.7** · DLSS5-Feeder **v0.15.1** |
@@ -56,7 +56,7 @@ This git tree has no app screenshot. Swapper is a third-party installer; Feeder 
 | **3** | Game has **no DLSS**, is **32-bit** (or DirectX 9) | **DLSS5-Feeder** 32-bit install — `dlss5-feed.addon32` + the `host64\` folder | `04-DLSS5-Feeder` |
 | **4** | Just want the **latest official DLSS DLLs** in games that already support DLSS | Copy the DLLs from `01` over the game folder | `01-Official-NVIDIA-DLLs` |
 | **5** | Prefer the **old-school conversion route** (FSR/XeSS frame gen on any GPU, non-RTX) | OptiScaler / DLSS Enabler — **pick ONE approach per game, never mix** | `05-Legacy-Optiscaler-DLSS-Enabler` |
-| **6** | Want the newest DLSS DLLs in **every** game/app on the PC — **no DLSS 5, nothing injected** (anti-cheat-safe) | **DLL Refresher** — scans the whole PC, swaps only NVIDIA's own runtime files, keeps backups | `06-DLL-Refresher` |
+| **6** | Want the newest DLSS DLLs in **every** game/app on the PC — **no DLSS 5, nothing injected** (anti-cheat-safe) | **DLL Refresher** — scans the whole PC and updates every DLSS-related file the pack ships (nvngx_dlss*, Streamline sl.*.dll, the DLSS 5 add-on, the feeder), keeps backups | `06-DLL-Refresher` |
 
 **Scenario 3 is the magic one this pack is built around:** NGX and the DLSS 5 add-on are 64-bit-only, so for a 32-bit game you drop the tiny 32-bit `dlss5-feed.addon32` next to the game exe *and* the complete `host64\` folder beside it. The add-on ships frames to the bundled 64-bit helper process, which does all the real DLSS 5 work GPU-to-GPU. Proven in practice: **Saints Row: The Third (32-bit) — 1440p DLAA, 99,000+ frames evaluated** (log from the pack owner's session, see `04-DLSS5-Feeder/README.md`).
 
@@ -91,7 +91,7 @@ DLSS5-AIO/
 ├── 05-Legacy-Optiscaler-DLSS-Enabler/ ← the old way (kept for reference)
 │   ├── Optiscaler/                   OptiScaler (upscaler/frame-gen bridge)
 │   └── dlss-enabler-setup_0.9.4-…exe DLSS Enabler
-└── 06-DLL-Refresher/                 ← swap only, no DLSS 5 (anti-cheat-safe)
+└── 06-DLL-Refresher/                 ← swap only, no install (anti-cheat-safe)
     ├── Refresh-DLSS-DLLs.bat         double-click menu
     └── DLSS-DLL-Refresher.ps1        whole-PC scan + swap, keeps originals
 ```
@@ -251,7 +251,7 @@ sha256sum -c SHA256SUMS.txt
 
 Verified in this tree:
 
-- latest GitHub release **v1.4.3** (adds folder `06` DLL refresher; DLSS 310.9.1.0, DLSSNR 310.8.SF.0, Swapper 2.2.7)
+- latest GitHub release **v1.4.4** (adds folder `06` DLL refresher; DLSS 310.9.1.0, DLSSNR 310.8.SF.0, Swapper 2.2.7)
 - documented official DLL versions **310.9.1.0** (SR/FG/RR) and neural runtime **310.8.SF.0** in folder READMEs
 - [SHA256SUMS.txt](SHA256SUMS.txt) hashes for every shipped file
 - CI (.github/workflows/ci.yml) runs scripts/check_release.py (doc pointers, license-forbidden shader paths, link check)

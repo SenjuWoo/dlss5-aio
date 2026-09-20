@@ -13,17 +13,18 @@ if not "%~1"=="" (
 cls
 echo ============================================================
 echo   DLSS 5 AIO  -  DLL Refresher
-echo   Brings every nvngx_dlss*.dll on this PC up to the pack's
-echo   official version. No injection, no hooks - file swap only.
+echo   Brings every DLSS file on this PC up to the pack's
+echo   official version: nvngx_dlss*, Streamline, the DLSS 5
+echo   add-on, the feeder. No injection, no hooks - file swap only.
 echo ============================================================
-set "NRSTATE=not included"
-if defined NR set "NRSTATE=INCLUDED"
+set "NRSTATE=included"
+if defined NR set "NRSTATE=SKIPPED"
 echo   DLSS 5 runtime (nvngx_dlssnr.dll): %NRSTATE%
 echo.
 echo   [1]  Scan only        (dry run, writes nothing)
 echo   [2]  Update all       (keeps the original of every file it replaces)
 echo   [3]  Restore          (put the originals back)
-echo   [4]  Include DLSS 5 runtime (nvngx_dlssnr.dll) in 1/2/3
+echo   [4]  Skip the DLSS 5 runtime (nvngx_dlssnr.dll) in 1/2/3
 echo   [5]  Scan a single folder
 echo   [6]  Self test        (proves the tool works)
 echo   [0]  Exit
@@ -40,10 +41,10 @@ if "%CHOICE%"=="0" exit /b 0
 goto menu
 
 :nr
-if defined NR (set "NR=") else (set "NR=-IncludeNR")
+if defined NR (set "NR=") else (set "NR=-SkipNR")
 echo.
-set "NRSTATE=not included"
-if defined NR set "NRSTATE=INCLUDED"
+set "NRSTATE=included"
+if defined NR set "NRSTATE=SKIPPED"
 echo   DLSS 5 runtime will be %NRSTATE%.
 timeout /t 2 >nul
 goto menu

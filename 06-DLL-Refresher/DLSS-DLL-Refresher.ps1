@@ -23,7 +23,7 @@ param(
     [string]$SourceDir,
     [string[]]$Exclude = @(),
     [switch]$Apply,
-    [switch]$IncludeNR,
+    [switch]$SkipNR,
     [switch]$Restore,
     [switch]$SelfTest
 )
@@ -34,8 +34,17 @@ $Roots = @($Roots | ForEach-Object { $_ -split ',' } | Where-Object { $_.Trim() 
 $Exclude = @($Exclude | ForEach-Object { $_ -split ',' } | Where-Object { $_.Trim() -ne '' } | ForEach-Object { $_.Trim() })
 $script:Here = $PSScriptRoot
 if (-not $script:Here) { $script:Here = Split-Path -Parent $MyInvocation.MyCommand.Path }
-$script:Names = @('nvngx_dlss.dll', 'nvngx_dlssg.dll', 'nvngx_dlssd.dll')
-if ($IncludeNR) { $script:Names += 'nvngx_dlssnr.dll' }
+# Everything DLSS-related the pack ships and a game/app may also carry. If the pack starts
+# shipping something else, add its filename here or it will be scanned for but never resolved.
+$script:Names = @(
+    'nvngx_dlss.dll', 'nvngx_dlssg.dll', 'nvngx_dlssd.dll',             # 01 - SR / FrameGen / RayReconstruction
+    'nvngx_dlssnr.dll',                                                 # 02 - DLSS 5 neural rendering runtime
+    'renodx-dlss5.addon64',                                             # 02 - the DLSS 5 ReShade add-on
+    'sl.common.dll', 'sl.dlss.dll', 'sl.dlss_g.dll', 'sl.dlss_nr.dll',  # 01\Streamline-* - Streamline runtime
+    'sl.interposer.dll', 'sl.nis.dll', 'sl.pcl.dll', 'sl.reflex.dll',
+    'dlss5-feed.addon64', 'dlss5-feed.addon32', 'DLSS5_Feed.fx'         # 04 - the feeder
+)
+if ($SkipNR) { $script:Names = @($script:Names | Where-Object { $_ -ne 'nvngx_dlssnr.dll' }) }
 # never touch other tools' backups - rewriting one silently breaks their restore
 $script:SkipPath = @('_dlss_originals', '_DLSS5_Backup', 'dlss5-backup', 'DLSS-Backup', '\Backup\',
                      '\Windows\', '\WindowsApps\', '$Recycle.Bin', 'System Volume Information')
@@ -90,28 +99,50 @@ function Get-Sha {
 function Resolve-Source {
     param([string]$dir)
     if (-not $dir) {
-        $here = $script:Here
-        $dir  = Join-Path (Split-Path -Parent $here) '01-Official-NVIDIA-DLLs'
+        $dir = Join-Path (Split-Path -Parent $script:Here) '01-Official-NVIDIA-DLLs'
     }
+    $pack = Split-Path -Parent $dir
     if (-not (Test-Path -LiteralPath $dir)) {
-        throw "Source folder not found: $dir`nRun this from inside the DLSS 5 AIO pack (folder 06), or pass -SourceDir."
+        throw ("Can't find the pack's DLL folder:`n  {0}`n`nExtract the DLSS 5 AIO release and run folder 06 from inside it, or point at the folder that holds the official DLLs:`n  .\DLSS-DLL-Refresher.ps1 -SourceDir 'D:\DLSS5-AIO\01-Official-NVIDIA-DLLs'" -f $dir)
     }
-    $nr = Join-Path (Split-Path -Parent $dir) '02-DLSS5-Neural-Rendering'
+    # the pack spreads its files over 01 (NVIDIA + Streamline), 02 (DLSS 5) and 04 (feeder)
+    $search = @($dir)
+    foreach ($sub in @('02-DLSS5-Neural-Rendering', '04-DLSS5-Feeder')) {
+        $p = Join-Path $pack $sub
+        if (Test-Path -LiteralPath $p) { $search += $p }
+    }
+    Get-ChildItem -LiteralPath $dir -Directory -Filter 'Streamline-*' -ErrorAction SilentlyContinue |
+        ForEach-Object { $search += $_.FullName }
+
     $map = @{}
     foreach ($n in $script:Names) {
-        $cand = Join-Path $dir $n
-        if (-not (Test-Path -LiteralPath $cand)) { $cand = Join-Path $nr $n }
-        if (Test-Path -LiteralPath $cand) {
-            $map[$n] = [pscustomobject]@{
-                Path    = (Resolve-Path -LiteralPath $cand).Path
-                Version = (Get-NumVersion (Get-FileVersionText $cand))
-                VerText = (Get-FileVersionText $cand)
-                Sha     = (Get-Sha $cand)
-                Machine = (Get-PEMachine $cand)
+        foreach ($d in $search) {
+            $cand = Join-Path $d $n
+            if (Test-Path -LiteralPath $cand) {
+                $map[$n] = [pscustomobject]@{
+                    Path    = (Resolve-Path -LiteralPath $cand).Path
+                    Version = (Get-NumVersion (Get-FileVersionText $cand))
+                    VerText = (Get-FileVersionText $cand)
+                    Sha     = (Get-Sha $cand)
+                    Machine = (Get-PEMachine $cand)
+                }
+                break
             }
         }
     }
-    if ($map.Count -eq 0) { throw "No nvngx_dlss*.dll found in $dir" }
+    if ($map.Count -eq 0) {
+        throw ("Found the folder, but no DLSS files inside it:`n  {0}`n`nThat is what the source repo looks like - it carries the tool, not the binaries.`nExtract the release pack (DLSS5-AIO-v*.7z.001) and run folder 06 from there." -f $dir)
+    }
+    # The feeder/add-on files live in the repo too, so a repo run can resolve *something* while
+    # the actual NVIDIA DLLs are missing. Without them there is no source of truth - say so.
+    $core = @($script:Names | Where-Object { $_ -like 'nvngx_*' -and $map.ContainsKey($_) })
+    if ($core.Count -eq 0) {
+        throw ("The pack's NVIDIA DLLs are not here:`n  {0}`n`nThis looks like the source repo, which carries the tool but not the binaries.`nExtract the release pack (DLSS5-AIO-v*.7z.001) and run folder 06 from inside it, or point at the DLLs:`n  .\DLSS-DLL-Refresher.ps1 -SourceDir 'D:\DLSS5-AIO\01-Official-NVIDIA-DLLs'" -f $dir)
+    }
+    $missing = @($script:Names | Where-Object { -not $map.ContainsKey($_) })
+    if ($missing.Count -gt 0) {
+        Write-Host ("  note: not in this pack, so not checked: {0}" -f ($missing -join ', ')) -ForegroundColor DarkYellow
+    }
     return $map
 }
 
@@ -167,7 +198,11 @@ function Invoke-Refresher {
         else {
             $have = Get-NumVersion $row.Have
             $same = ((Get-Sha $p) -eq $src.Sha)
-            if ($same)                       { $row.Action = 'SKIP'; $row.Note = 'already current' }
+            if ($same) { $row.Action = 'SKIP'; $row.Note = 'already current' }
+            elseif ($null -eq $have -and $null -eq $src.Version) {
+                # no version resource on either side (shaders, .fx) - content decides
+                $row.Action = 'SWAP'; $row.Note = 'content differs'
+            }
             elseif ($null -eq $have)         { $row.Action = 'SKIP'; $row.Note = 'version unreadable - check by hand' }
             elseif ($have -gt $src.Version)  { $row.Action = 'SKIP'; $row.Note = 'newer than the pack - left alone' }
             elseif ($have -eq $src.Version)  { $row.Action = 'SWAP'; $row.Note = 'same version, different build' }
@@ -219,7 +254,7 @@ function Show-Report {
     $skip = @($rows | Where-Object Action -eq 'SKIP')
     $fail = @($rows | Where-Object Action -eq 'FAIL')
 
-    if ($rows.Count -eq 0) { Write-Host "`nNo nvngx_dlss*.dll found under the scanned roots." -ForegroundColor Yellow; return }
+    if ($rows.Count -eq 0) { Write-Host "`nNothing to report: no file the pack ships a source for was found under the scanned roots." -ForegroundColor Yellow; return }
 
     Write-Host "`nNOTE: online games with anti-cheat (Battlefield, Marvel Rivals, GTA Online, ...) can" -ForegroundColor Yellow
     Write-Host "      flag a swapped DLL. Skip those folders with -Exclude before you -Apply." -ForegroundColor Yellow
@@ -303,9 +338,17 @@ function Invoke-SelfTest {
 
 # ---------- main ----------
 
-$map = Resolve-Source -dir $SourceDir
+$map = $null
+try { $map = Resolve-Source -dir $SourceDir }
+catch {
+    Write-Host ""
+    Write-Host $_.Exception.Message -ForegroundColor Red
+    Write-Host ""
+    exit 1
+}
 Write-Host "Official set:" -ForegroundColor Cyan
-foreach ($k in $map.Keys) { Write-Host ("  {0,-18} {1}" -f $k, $map[$k].VerText) }
+foreach ($k in ($map.Keys | Sort-Object)) { Write-Host ("  {0,-22} {1}" -f $k, $map[$k].VerText) }
+Write-Host ("  ({0} file(s) will be used as the source of truth)" -f $map.Count) -ForegroundColor DarkGray
 
 if ($SelfTest) { Invoke-SelfTest -map $map }
 
