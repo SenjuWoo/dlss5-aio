@@ -32,6 +32,8 @@ $ErrorActionPreference = 'Continue'
 # "-File" passes a comma-joined string as ONE argument - split it, and drop blanks
 $Roots = @($Roots | ForEach-Object { $_ -split ',' } | Where-Object { $_.Trim() -ne '' } | ForEach-Object { $_.Trim() })
 $Exclude = @($Exclude | ForEach-Object { $_ -split ',' } | Where-Object { $_.Trim() -ne '' } | ForEach-Object { $_.Trim() })
+$script:Here = $PSScriptRoot
+if (-not $script:Here) { $script:Here = Split-Path -Parent $MyInvocation.MyCommand.Path }
 $script:Names = @('nvngx_dlss.dll', 'nvngx_dlssg.dll', 'nvngx_dlssd.dll')
 if ($IncludeNR) { $script:Names += 'nvngx_dlssnr.dll' }
 # never touch other tools' backups - rewriting one silently breaks their restore
@@ -78,7 +80,7 @@ function Get-Sha {
 function Resolve-Source {
     param([string]$dir)
     if (-not $dir) {
-        $here = Split-Path -Parent $MyInvocation.MyCommand.Path
+        $here = $script:Here
         $dir  = Join-Path (Split-Path -Parent $here) '01-Official-NVIDIA-DLLs'
     }
     if (-not (Test-Path -LiteralPath $dir)) {

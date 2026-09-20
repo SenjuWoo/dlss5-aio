@@ -3,6 +3,12 @@ setlocal
 title DLSS 5 AIO - DLL Refresher
 cd /d "%~dp0"
 
+rem Arguments given? Forward them straight to the PowerShell tool and exit (no menu).
+if not "%~1"=="" (
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0DLSS-DLL-Refresher.ps1" %*
+  exit /b %errorlevel%
+)
+
 :menu
 cls
 echo ============================================================
@@ -10,7 +16,9 @@ echo   DLSS 5 AIO  -  DLL Refresher
 echo   Brings every nvngx_dlss*.dll on this PC up to the pack's
 echo   official version. No injection, no hooks - file swap only.
 echo ============================================================
-if defined NR (echo   DLSS 5 runtime (nvngx_dlssnr.dll): INCLUDED) else (echo   DLSS 5 runtime (nvngx_dlssnr.dll): not included)
+set "NRSTATE=not included"
+if defined NR set "NRSTATE=INCLUDED"
+echo   DLSS 5 runtime (nvngx_dlssnr.dll): %NRSTATE%
 echo.
 echo   [1]  Scan only        (dry run, writes nothing)
 echo   [2]  Update all       (keeps the original of every file it replaces)
@@ -34,7 +42,9 @@ goto menu
 :nr
 if defined NR (set "NR=") else (set "NR=-IncludeNR")
 echo.
-if defined NR (echo   DLSS 5 runtime will be INCLUDED.) else (echo   DLSS 5 runtime will NOT be included.)
+set "NRSTATE=not included"
+if defined NR set "NRSTATE=INCLUDED"
+echo   DLSS 5 runtime will be %NRSTATE%.
 timeout /t 2 >nul
 goto menu
 
