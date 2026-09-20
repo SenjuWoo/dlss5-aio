@@ -34,6 +34,7 @@ Double-click **`Refresh-DLSS-DLLs.bat`**.
 | 4 - Skip DLSS 5 runtime | Drops `nvngx_dlssnr.dll` from the scan. Everything else is always included. |
 | 5 - Scan a single folder | For when you only care about one game folder. |
 | 6 - Self test | Builds a throwaway fixture and proves detect / swap / backup / restore all work. |
+| 7 - Include online games | **Off by default.** Turns the anti-cheat skip off - see below. |
 
 Straight from a terminal, if you prefer:
 
@@ -63,10 +64,15 @@ Straight from a terminal, if you prefer:
 - Files that are locked (game running, service holding them) are reported as
   failed instead of being forced.
 
-**Anti-cheat:** online games with kernel anti-cheat (Battlefield, Marvel Rivals,
-GTA Online, ...) can treat a swapped DLL as tampering. The report warns about it,
-and `-Exclude` skips those folders entirely. Offline and single-player games are
-the point of this tool.
+**Anti-cheat:** online games with kernel anti-cheat (Fortnite, Marvel Rivals, Star
+Citizen, Battlefield, Call of Duty, Overwatch, The Finals, Helldivers 2, Palworld,
+Halo, GTA V Enhanced, Black Desert, Warframe, Destiny 2, Valorant, Apex, Tarkov,
+PUBG, Rainbow Six, Elden Ring, The Division) are **skipped by default** - they still
+show up in the report, marked with the reason. `-ForceOnline` (menu option 7) turns
+that off; `-Exclude` skips further folders by name. Matching ignores spaces and
+punctuation, so `-Exclude 'Marvel Rivals'` catches a `MarvelRivals` folder.
+
+Offline and single-player games are the point of this tool.
 
 The versions it installs come from `01-Official-NVIDIA-DLLs\` in this pack - update
 the pack, and this tool installs whatever the pack ships.

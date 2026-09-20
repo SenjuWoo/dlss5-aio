@@ -15,7 +15,7 @@
 <p align="center">
   <a href="https://github.com/SenjuWoo/dlss5-aio/actions/workflows/ci.yml"><img src="https://github.com/SenjuWoo/dlss5-aio/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-8fa3b8?labelColor=0b1016" alt="MIT License"></a>
-  <a href="https://github.com/SenjuWoo/dlss5-aio/releases/tag/v1.4.4"><img src="https://img.shields.io/badge/release-v1.4.4-6b8cae?labelColor=0b1016" alt="v1.4.4"></a>
+  <a href="https://github.com/SenjuWoo/dlss5-aio/releases/tag/v1.4.5"><img src="https://img.shields.io/badge/release-v1.4.5-6b8cae?labelColor=0b1016" alt="v1.4.5"></a>
 </p>
 
 <p align="center">
@@ -34,7 +34,7 @@
 
 | | |
 | --- | --- |
-| **Latest release** | [v1.4.4](https://github.com/SenjuWoo/dlss5-aio/releases/tag/v1.4.4) (adds folder 06 — whole-PC DLL refresher) |
+| **Latest release** | [v1.4.5](https://github.com/SenjuWoo/dlss5-aio/releases/tag/v1.4.5) (adds folder 06 — whole-PC DLL refresher) |
 | **Official NVIDIA DLSS DLLs** | **310.9.1.0** — Super Resolution, Frame Generation, Ray Reconstruction (documented in [`01-Official-NVIDIA-DLLs/README.md`](01-Official-NVIDIA-DLLs/README.md); signed production builds in the release 7-Zip, hashed in [`SHA256SUMS.txt`](SHA256SUMS.txt)) |
 | **DLSS 5 neural-rendering runtime** | `nvngx_dlssnr.dll` **310.8.SF.0** (NVIDIA production build, unsigned; documented in [`02-DLSS5-Neural-Rendering/README.md`](02-DLSS5-Neural-Rendering/README.md)) |
 | **Tools** | DLSS5-Swapper **2.2.7** · DLSS5-Feeder **v0.15.1** |
@@ -251,7 +251,7 @@ sha256sum -c SHA256SUMS.txt
 
 Verified in this tree:
 
-- latest GitHub release **v1.4.4** (adds folder `06` DLL refresher; DLSS 310.9.1.0, DLSSNR 310.8.SF.0, Swapper 2.2.7)
+- latest GitHub release **v1.4.5** (adds folder `06` DLL refresher; DLSS 310.9.1.0, DLSSNR 310.8.SF.0, Swapper 2.2.7)
 - documented official DLL versions **310.9.1.0** (SR/FG/RR) and neural runtime **310.8.SF.0** in folder READMEs
 - [SHA256SUMS.txt](SHA256SUMS.txt) hashes for every shipped file
 - CI (.github/workflows/ci.yml) runs scripts/check_release.py (doc pointers, license-forbidden shader paths, link check)

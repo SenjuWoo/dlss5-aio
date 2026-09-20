@@ -24,6 +24,7 @@ param(
     [string[]]$Exclude = @(),
     [switch]$Apply,
     [switch]$SkipNR,
+    [switch]$ForceOnline,
     [switch]$Restore,
     [switch]$SelfTest
 )
@@ -45,6 +46,14 @@ $script:Names = @(
     'dlss5-feed.addon64', 'dlss5-feed.addon32', 'DLSS5_Feed.fx'         # 04 - the feeder
 )
 if ($SkipNR) { $script:Names = @($script:Names | Where-Object { $_ -ne 'nvngx_dlssnr.dll' }) }
+# Kernel-anti-cheat online games: skipped by default, because a swapped DLL can read as
+# tampering. Matched against the path with spaces/punctuation stripped, so "Marvel Rivals"
+# and "MarvelRivals" both hit. -ForceOnline overrides.
+$script:Online = @('fortnite', 'marvelrivals', 'starcitizen', 'battlefield', 'callofduty',
+                   'overwatch', 'thefinals', 'helldivers', 'palworld', 'haloinfinite',
+                   'halothemasterchief', 'grandtheftautov', 'gtavenhanced', 'blackdesert',
+                   'destiny2', 'valorant', 'apexlegends', 'escapefromtarkov', 'pubg',
+                   'rainbowsix', 'warframe', 'eldenring', 'thedivision')
 # never touch other tools' backups - rewriting one silently breaks their restore
 $script:SkipPath = @('_dlss_originals', '_DLSS5_Backup', 'dlss5-backup', 'DLSS-Backup', '\Backup\',
                      '\Windows\', '\WindowsApps\', '$Recycle.Bin', 'System Volume Information')
@@ -94,6 +103,13 @@ function Get-FileVersionText {
 function Get-Sha {
     param([string]$path)
     try { return (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash } catch { return $null }
+}
+
+# strip spaces and punctuation so "Marvel Rivals" and "MarvelRivals" compare equal
+function Get-Norm {
+    param([string]$s)
+    if (-not $s) { return '' }
+    return ($s -replace '[\s_\-\.\*]', '').ToLower()
 }
 
 function Resolve-Source {
@@ -169,7 +185,10 @@ function Find-Targets {
                     $p = $_.FullName
                     $skip = $false
                     foreach ($s in $script:SkipPath) { if ($p -like "*$s*") { $skip = $true; break } }
-                    if (-not $skip) { foreach ($e in $Exclude) { if ($p -like "*$e*") { $skip = $true; break } } }
+                    if (-not $skip) {
+                        $np = Get-Norm $p
+                        foreach ($e in $Exclude) { if ($p -like "*$e*" -or $np -like "*$(Get-Norm $e)*") { $skip = $true; break } }
+                    }
                     if (-not $skip) { [void]$found.Add($p) }
                 }
         }
@@ -192,10 +211,16 @@ function Invoke-Refresher {
             Action = ''; Note = ''
         }
 
-        if ((Get-PEMachine $p) -ne $src.Machine) {
+        if (-not $ForceOnline) {
+            $np = Get-Norm $p
+            $hit = $null
+            foreach ($a in $script:Online) { if ($np -like "*$a*") { $hit = $a; break } }
+            if ($hit) { $row.Action = 'SKIP'; $row.Note = 'online game with kernel anti-cheat - skipped (safe default)' }
+        }
+        if ($row.Action -eq '' -and (Get-PEMachine $p) -ne $src.Machine) {
             $row.Action = 'SKIP'; $row.Note = '32-bit file - the pack ships the 64-bit build'
         }
-        else {
+        elseif ($row.Action -eq '') {
             $have = Get-NumVersion $row.Have
             $same = ((Get-Sha $p) -eq $src.Sha)
             if ($same) { $row.Action = 'SKIP'; $row.Note = 'already current' }
@@ -256,8 +281,9 @@ function Show-Report {
 
     if ($rows.Count -eq 0) { Write-Host "`nNothing to report: no file the pack ships a source for was found under the scanned roots." -ForegroundColor Yellow; return }
 
-    Write-Host "`nNOTE: online games with anti-cheat (Battlefield, Marvel Rivals, GTA Online, ...) can" -ForegroundColor Yellow
-    Write-Host "      flag a swapped DLL. Skip those folders with -Exclude before you -Apply." -ForegroundColor Yellow
+    Write-Host "`nNOTE: online games with kernel anti-cheat (Fortnite, Marvel Rivals, Star Citizen, ...)" -ForegroundColor Yellow
+    Write-Host "      are skipped by default - they show in 'left alone' with the reason. -ForceOnline" -ForegroundColor Yellow
+    Write-Host "      overrides that; -Exclude skips extra folders by name." -ForegroundColor Yellow
 
     Write-Host "`n=== Files that need the update ===" -ForegroundColor Cyan
     if ($swap.Count -eq 0) { Write-Host "  (none - everything is current)" -ForegroundColor Green }
@@ -270,7 +296,8 @@ function Show-Report {
         $fail | Format-Table @{L='note';E={$_.Note}}, Path -AutoSize | Out-String | Write-Host
     }
 
-    Write-Host ("Scanned: {0} file(s) | to update: {1} | untouched: {2} | failed: {3}" -f $rows.Count, $swap.Count, $skip.Count, $fail.Count) -ForegroundColor Cyan
+    $online = @($skip | Where-Object { $_.Note -like '*anti-cheat*' })
+    Write-Host ("Scanned: {0} file(s) | to update: {1} | current: {2} | skipped online: {3} | failed: {4}" -f $rows.Count, $swap.Count, ($skip.Count - $online.Count), $online.Count, $fail.Count) -ForegroundColor Cyan
     if (-not $Apply -and $swap.Count -gt 0) {
         Write-Host "`nDry run - nothing was written. Re-run with -Apply to replace them (originals are kept in _dlss_originals\)." -ForegroundColor Yellow
     }
@@ -304,6 +331,10 @@ function Invoke-SelfTest {
     $b[0x44] = 0x4C; $b[0x45] = 0x01        # machine 0x014C = x86
     [IO.File]::WriteAllBytes((Join-Path $x86 $name), $b)
 
+    # 4. an online game folder -> must be skipped by default (anti-cheat), swapped only with -ForceOnline
+    $ac = Join-Path $fix 'MarvelRivals'; New-Item -ItemType Directory -Path $ac -Force | Out-Null
+    [IO.File]::WriteAllBytes((Join-Path $ac $name), ($bytes + [byte]0))
+
     $rows = Invoke-Refresher -map $map -roots @($fix)
     $byPath = @{}; foreach ($r in $rows) { $byPath[(Split-Path -Leaf (Split-Path -Parent $r.Path))] = $r }
 
@@ -313,12 +344,19 @@ function Invoke-SelfTest {
     Assert ($byPath['current'].Action -eq 'SKIP')  'identical file is left alone'
     Assert ($byPath['modified'].Action -eq 'SWAP') 'same-version different-build is flagged'
     Assert ($byPath['x86'].Action -eq 'SKIP' -and $byPath['x86'].Note -like '*32-bit*') '32-bit file is skipped'
+    Assert ($byPath['MarvelRivals'].Action -eq 'SKIP' -and $byPath['MarvelRivals'].Note -like '*anti-cheat*') 'online game folder is skipped by default'
 
     $script:Apply = $true
     $rows2 = Invoke-Refresher -map $map -roots @($fix)
     Assert ((Get-Sha (Join-Path $mod $name)) -eq $src.Sha) 'apply: file now matches the official build'
     Assert (Test-Path -LiteralPath (Join-Path $mod '_dlss_originals\nvngx_dlss.dll')) 'apply: original was backed up'
     Assert ((Get-Sha (Join-Path $x86 $name)) -ne $src.Sha) 'apply: 32-bit file untouched'
+    Assert ((Get-Sha (Join-Path $ac $name)) -ne $src.Sha) 'apply: online game folder left untouched'
+    $script:ForceOnline = $true
+    Invoke-Refresher -map $map -roots @($fix) | Out-Null
+    Assert ((Get-Sha (Join-Path $ac $name)) -eq $src.Sha) '-ForceOnline overrides the online skip'
+    $script:ForceOnline = $false
+    Assert ((Get-Norm 'Marvel Rivals') -eq (Get-Norm 'MarvelRivals')) 'name matching ignores spaces'
 
     # version parsing: a build tag must not make a release line look newer/older than it is
     Assert ((Get-NumVersion '310.8.SF.0') -eq (Get-NumVersion '310,8,0,0')) 'build-tagged version equals its numeric form'
