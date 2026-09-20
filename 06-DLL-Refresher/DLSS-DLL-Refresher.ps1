@@ -79,6 +79,14 @@ function Get-NumVersion {
     try { return [version]($parts -join '.') } catch { return $null }
 }
 
+# Hashing is the expensive part of a scan (tens of MB per DLL); read each file once at most.
+$script:ShaCache = @{}
+function Get-ShaCached {
+    param([string]$p)
+    if (-not $script:ShaCache.ContainsKey($p)) { $script:ShaCache[$p] = (Get-Sha $p) }
+    return $script:ShaCache[$p]
+}
+
 function Get-PEMachine {
     param([string]$path)
     try {
@@ -113,22 +121,32 @@ function Get-Norm {
 }
 
 # Look for an extracted pack near this script (the repo carries the tool, not the binaries).
-# Breadth-first with a directory cap so it stays fast on big trees; shallow hits win.
+# Breadth-first, name-filtered and capped: a pack's folder is always DLSS5-AIO*, so we only
+# descend into names that can lead to one. Unfiltered this walks 400 directories (~20s on a
+# slow drive) to find what the filter reaches in about fifteen.
 function Find-Pack {
     param([string]$start, [int]$maxDirs = 400)
     if (-not $start -or -not (Test-Path -LiteralPath $start)) { return $null }
     $q = New-Object System.Collections.Queue
     $q.Enqueue($start)
-    $seen = 0
+    $seen = 0; $best = $null; $bestVer = $null
     while ($q.Count -gt 0 -and $seen -lt $maxDirs) {
         $d = $q.Dequeue(); $seen++
-        if ((Split-Path -Leaf $d) -eq '01-Official-NVIDIA-DLLs' -and
-            (Test-Path -LiteralPath (Join-Path $d 'nvngx_dlss.dll'))) { return $d }
+        if ((Split-Path -Leaf $d) -eq '01-Official-NVIDIA-DLLs') {
+            $dll = Join-Path $d 'nvngx_dlss.dll'
+            if (Test-Path -LiteralPath $dll) {
+                # two packs can share a subtree - the newest DLLs win, never the first found
+                $v = Get-NumVersion (Get-FileVersionText $dll)
+                if ($null -ne $v -and ($null -eq $bestVer -or $v -gt $bestVer)) { $best = $d; $bestVer = $v }
+                continue        # a pack has no nested pack; don't spend budget inside it
+            }
+        }
         foreach ($c in (Get-ChildItem -LiteralPath $d -Directory -Force -ErrorAction SilentlyContinue)) {
-            if ($c.Name -notmatch '^(\$Recycle|System Volume|Windows$|WindowsApps|Program Files)') { $q.Enqueue($c.FullName) }
+            if ($c.Name -match '^(01-Official-NVIDIA-DLLs|.*dlss)' -and
+                $c.Name -notmatch '^(\$Recycle|System Volume|Windows$|WindowsApps|Program Files)') { $q.Enqueue($c.FullName) }
         }
     }
-    return $null
+    return $best
 }
 
 function Resolve-Source {
@@ -138,16 +156,24 @@ function Resolve-Source {
     }
     $pack = Split-Path -Parent $dir
     if (-not (Test-Path -LiteralPath $dir) -or -not (Test-Path -LiteralPath (Join-Path $dir 'nvngx_dlss.dll'))) {
-        # not next to us - look for an extracted pack nearby before giving up
-        $found = $null
-        $walk = $script:Here
-        for ($i = 0; $i -lt 3 -and -not $found; $i++) {
-            $walk = Split-Path -Parent $walk
-            if (-not $walk) { break }
-            $found = Find-Pack -start $walk
+        # not next to us - look for an extracted pack nearby before giving up.
+        # One budget per ancestor: a single shared budget gets eaten by the first
+        # (often huge) ancestor and never reaches a pack nested three deep.
+        $walk = @(); $up = $script:Here
+        for ($i = 0; $i -lt 3; $i++) {
+            $up = Split-Path -Parent $up
+            if (-not $up) { break }
+            $walk += $up
+        }
+        $found = $null; $foundVer = $null
+        foreach ($root in $walk) {
+            $hit = Find-Pack -start $root
+            if (-not $hit) { continue }
+            $v = Get-NumVersion (Get-FileVersionText (Join-Path $hit 'nvngx_dlss.dll'))
+            if ($null -ne $v -and ($null -eq $foundVer -or $v -gt $foundVer)) { $found = $hit; $foundVer = $v }
         }
         if ($found) {
-            Write-Host ("  using the pack found nearby: {0}" -f $found) -ForegroundColor DarkGray
+            Write-Host ("  using the pack found nearby: {0}  (nvngx_dlss {1})" -f $found, $foundVer) -ForegroundColor DarkGray
             $dir  = $found
             $pack = Split-Path -Parent $dir
         }
@@ -173,7 +199,6 @@ function Resolve-Source {
                     Path    = (Resolve-Path -LiteralPath $cand).Path
                     Version = (Get-NumVersion (Get-FileVersionText $cand))
                     VerText = (Get-FileVersionText $cand)
-                    Sha     = (Get-Sha $cand)
                     Machine = (Get-PEMachine $cand)
                 }
                 break
@@ -204,6 +229,29 @@ function Get-ScanRoots {
             ForEach-Object { $_.Root })
 }
 
+# Walk a root and keep only the filenames we care about. Get-ChildItem builds a FileInfo for
+# every file it meets (44s over 900k files); raw .NET enumeration of names costs 14s, and the
+# per-directory try/catch keeps one unreadable folder from aborting the whole scan.
+function Get-FilesByName {
+    param([string]$root, [hashtable]$want)
+    $stack = New-Object System.Collections.Stack
+    $stack.Push($root)
+    while ($stack.Count -gt 0) {
+        $d = $stack.Pop()
+        try {
+            foreach ($f in [IO.Directory]::EnumerateFiles($d)) {
+                if ($want.ContainsKey([IO.Path]::GetFileName($f))) { $f }
+            }
+            foreach ($s in [IO.Directory]::EnumerateDirectories($d)) {
+                # junctions and symlinks can loop back on themselves
+                try { if (([IO.File]::GetAttributes($s) -band [IO.FileAttributes]::ReparsePoint) -ne 0) { continue } } catch { continue }
+                $stack.Push($s)
+            }
+        }
+        catch { }
+    }
+}
+
 function Find-Targets {
     param([string[]]$scanRoots, [string[]]$names)
     $found = New-Object System.Collections.ArrayList
@@ -213,18 +261,19 @@ function Find-Targets {
             continue
         }
         Write-Host ("  scanning {0} ..." -f $root) -ForegroundColor DarkGray
-        foreach ($n in $names) {
-            Get-ChildItem -LiteralPath $root -Recurse -File -Filter $n -Force -ErrorAction SilentlyContinue |
-                ForEach-Object {
-                    $p = $_.FullName
-                    $skip = $false
-                    foreach ($s in $script:SkipPath) { if ($p -like "*$s*") { $skip = $true; break } }
-                    if (-not $skip) {
-                        $np = Get-Norm $p
-                        foreach ($e in $Exclude) { if ($p -like "*$e*" -or $np -like "*$(Get-Norm $e)*") { $skip = $true; break } }
-                    }
-                    if (-not $skip) { [void]$found.Add($p) }
-                }
+        # one walk per root, matching names as we go: 16 filtered walks of a 500k-file tree
+        # is the difference between ~1 minute and ~7 for the same answer.
+        $want = @{}
+        foreach ($n in $names) { $want[$n.ToLower()] = $true }
+        Get-FilesByName -root $root -want $want | ForEach-Object {
+            $p = $_
+            $skip = $false
+            foreach ($s in $script:SkipPath) { if ($p -like "*$s*") { $skip = $true; break } }
+            if (-not $skip) {
+                $np = Get-Norm $p
+                foreach ($e in $Exclude) { if ($p -like "*$e*" -or $np -like "*$(Get-Norm $e)*") { $skip = $true; break } }
+            }
+            if (-not $skip) { [void]$found.Add($p) }
         }
     }
     return $found
@@ -256,16 +305,19 @@ function Invoke-Refresher {
         }
         elseif ($row.Action -eq '') {
             $have = Get-NumVersion $row.Have
-            $same = ((Get-Sha $p) -eq $src.Sha)
-            if ($same) { $row.Action = 'SKIP'; $row.Note = 'already current' }
-            elseif ($null -eq $have -and $null -eq $src.Version) {
-                # no version resource on either side (shaders, .fx) - content decides
-                $row.Action = 'SWAP'; $row.Note = 'content differs'
+            if ($null -ne $have -and $null -ne $src.Version -and $have -ne $src.Version) {
+                # the version alone settles it - no need to read a byte
+                if ($have -gt $src.Version) { $row.Action = 'SKIP'; $row.Note = 'newer than the pack - left alone' }
+                else                        { $row.Action = 'SWAP'; $row.Note = 'older' }
             }
-            elseif ($null -eq $have)         { $row.Action = 'SKIP'; $row.Note = 'version unreadable - check by hand' }
-            elseif ($have -gt $src.Version)  { $row.Action = 'SKIP'; $row.Note = 'newer than the pack - left alone' }
-            elseif ($have -eq $src.Version)  { $row.Action = 'SWAP'; $row.Note = 'same version, different build' }
-            else                             { $row.Action = 'SWAP'; $row.Note = 'older' }
+            else {
+                # equal or unreadable versions: only content can tell them apart, so hash now.
+                # Hashing up front costs 200 MB of reads per scan for an answer nothing used.
+                if ((Get-ShaCached $p) -eq (Get-ShaCached $src.Path)) { $row.Action = 'SKIP'; $row.Note = 'already current' }
+                elseif ($null -eq $src.Version) { $row.Action = 'SWAP'; $row.Note = 'content differs' }
+                elseif ($null -eq $have)        { $row.Action = 'SKIP'; $row.Note = 'version unreadable - check by hand' }
+                else                            { $row.Action = 'SWAP'; $row.Note = 'same version, different build' }
+            }
         }
 
         if ($row.Action -eq 'SWAP' -and $Apply) {
@@ -388,13 +440,13 @@ function Invoke-SelfTest {
 
     $script:Apply = $true
     $rows2 = Invoke-Refresher -map $map -roots @($fix)
-    Assert ((Get-Sha (Join-Path $mod $name)) -eq $src.Sha) 'apply: file now matches the official build'
+    Assert ((Get-Sha (Join-Path $mod $name)) -eq (Get-ShaCached $src.Path)) 'apply: file now matches the official build'
     Assert (Test-Path -LiteralPath (Join-Path $mod '_dlss_originals\nvngx_dlss.dll')) 'apply: original was backed up'
-    Assert ((Get-Sha (Join-Path $x86 $name)) -ne $src.Sha) 'apply: 32-bit file untouched'
-    Assert ((Get-Sha (Join-Path $ac $name)) -ne $src.Sha) 'apply: online game folder left untouched'
+    Assert ((Get-Sha (Join-Path $x86 $name)) -ne (Get-ShaCached $src.Path)) 'apply: 32-bit file untouched'
+    Assert ((Get-Sha (Join-Path $ac $name)) -ne (Get-ShaCached $src.Path)) 'apply: online game folder left untouched'
     $script:ForceOnline = $true
     Invoke-Refresher -map $map -roots @($fix) | Out-Null
-    Assert ((Get-Sha (Join-Path $ac $name)) -eq $src.Sha) '-ForceOnline overrides the online skip'
+    Assert ((Get-Sha (Join-Path $ac $name)) -eq (Get-ShaCached $src.Path)) '-ForceOnline overrides the online skip'
     $script:ForceOnline = $false
     Assert ((Get-Norm 'Marvel Rivals') -eq (Get-Norm 'MarvelRivals')) 'name matching ignores spaces'
     $one = Invoke-Refresher -map $map -roots @($cur)
@@ -408,7 +460,7 @@ function Invoke-SelfTest {
     $script:Apply = $false
 
     Invoke-Restore -roots @($fix) | Out-Null
-    Assert ((Get-Sha (Join-Path $mod $name)) -ne $src.Sha) 'restore: original put back'
+    Assert ((Get-Sha (Join-Path $mod $name)) -ne (Get-ShaCached $src.Path)) 'restore: original put back'
 
     Remove-Item -LiteralPath $fix -Recurse -Force -ErrorAction SilentlyContinue
     Write-Host ""
