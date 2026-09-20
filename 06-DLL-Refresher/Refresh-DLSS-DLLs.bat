@@ -31,6 +31,7 @@ echo   [4]  Skip the DLSS 5 runtime (nvngx_dlssnr.dll) in 1/2/3
 echo   [5]  Scan a single folder
 echo   [6]  Self test        (proves the tool works)
 echo   [7]  Include online games  (Fortnite, Marvel Rivals, ... - anti-cheat risk)
+echo   [8]  Point at the DLL folder  (only if the pack is somewhere else)
 echo   [0]  Exit
 echo.
 set /p CHOICE=  Choose: 
@@ -42,6 +43,7 @@ if "%CHOICE%"=="4" goto nr
 if "%CHOICE%"=="5" goto folder
 if "%CHOICE%"=="6" goto selftest
 if "%CHOICE%"=="7" goto online
+if "%CHOICE%"=="8" goto srcdir
 if "%CHOICE%"=="0" exit /b 0
 goto menu
 
@@ -63,30 +65,40 @@ echo   Online games will be %ONSTATE%.
 timeout /t 2 >nul
 goto menu
 
+:srcdir
+echo.
+echo   Folder that holds the official DLLs - usually the pack's 01-Official-NVIDIA-DLLs
+set /p SRCPATH=  Path (or press Enter to search next to this tool again): 
+if "%SRCPATH%"=="" (set "SRCDIR=") else (set "SRCDIR=-SourceDir "%SRCPATH%"")
+echo.
+if defined SRCDIR (echo   Using: %SRCPATH%) else (echo   Cleared - it will search next to itself again.)
+timeout /t 2 >nul
+goto menu
+
 :scan
 echo.
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0DLSS-DLL-Refresher.ps1" %NR% %ONLINE%
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0DLSS-DLL-Refresher.ps1" %NR% %SRCDIR% %ONLINE%
 goto done
 
 :apply
 echo.
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0DLSS-DLL-Refresher.ps1" -Apply %NR% %ONLINE%
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0DLSS-DLL-Refresher.ps1" -Apply %NR% %SRCDIR% %ONLINE%
 goto done
 
 :restore
 echo.
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0DLSS-DLL-Refresher.ps1" -Restore %NR% %ONLINE%
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0DLSS-DLL-Refresher.ps1" -Restore %NR% %SRCDIR% %ONLINE%
 goto done
 
 :folder
 echo.
 set /p FOLDER=  Folder to scan (example: D:\Games): 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0DLSS-DLL-Refresher.ps1" -Roots "%FOLDER%" %NR% %ONLINE%
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0DLSS-DLL-Refresher.ps1" -Roots "%FOLDER%" %NR% %SRCDIR% %ONLINE%
 goto done
 
 :selftest
 echo.
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0DLSS-DLL-Refresher.ps1" -SelfTest %NR% %ONLINE%
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0DLSS-DLL-Refresher.ps1" -SelfTest %NR% %SRCDIR% %ONLINE%
 goto done
 
 :done

@@ -35,6 +35,7 @@ Double-click **`Refresh-DLSS-DLLs.bat`**.
 | 5 - Scan a single folder | For when you only care about one game folder. |
 | 6 - Self test | Builds a throwaway fixture and proves detect / swap / backup / restore all work. |
 | 7 - Include online games | **Off by default.** Turns the anti-cheat skip off - see below. |
+| 8 - Point at the DLL folder | Only needed if the tool can't find the pack next to itself. |
 
 Straight from a terminal, if you prefer:
 

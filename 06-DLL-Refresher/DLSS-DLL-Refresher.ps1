@@ -112,12 +112,46 @@ function Get-Norm {
     return ($s -replace '[\s_\-\.\*]', '').ToLower()
 }
 
+# Look for an extracted pack near this script (the repo carries the tool, not the binaries).
+# Breadth-first with a directory cap so it stays fast on big trees; shallow hits win.
+function Find-Pack {
+    param([string]$start, [int]$maxDirs = 400)
+    if (-not $start -or -not (Test-Path -LiteralPath $start)) { return $null }
+    $q = New-Object System.Collections.Queue
+    $q.Enqueue($start)
+    $seen = 0
+    while ($q.Count -gt 0 -and $seen -lt $maxDirs) {
+        $d = $q.Dequeue(); $seen++
+        if ((Split-Path -Leaf $d) -eq '01-Official-NVIDIA-DLLs' -and
+            (Test-Path -LiteralPath (Join-Path $d 'nvngx_dlss.dll'))) { return $d }
+        foreach ($c in (Get-ChildItem -LiteralPath $d -Directory -Force -ErrorAction SilentlyContinue)) {
+            if ($c.Name -notmatch '^(\$Recycle|System Volume|Windows$|WindowsApps|Program Files)') { $q.Enqueue($c.FullName) }
+        }
+    }
+    return $null
+}
+
 function Resolve-Source {
     param([string]$dir)
     if (-not $dir) {
         $dir = Join-Path (Split-Path -Parent $script:Here) '01-Official-NVIDIA-DLLs'
     }
     $pack = Split-Path -Parent $dir
+    if (-not (Test-Path -LiteralPath $dir) -or -not (Test-Path -LiteralPath (Join-Path $dir 'nvngx_dlss.dll'))) {
+        # not next to us - look for an extracted pack nearby before giving up
+        $found = $null
+        $walk = $script:Here
+        for ($i = 0; $i -lt 3 -and -not $found; $i++) {
+            $walk = Split-Path -Parent $walk
+            if (-not $walk) { break }
+            $found = Find-Pack -start $walk
+        }
+        if ($found) {
+            Write-Host ("  using the pack found nearby: {0}" -f $found) -ForegroundColor DarkGray
+            $dir  = $found
+            $pack = Split-Path -Parent $dir
+        }
+    }
     if (-not (Test-Path -LiteralPath $dir)) {
         throw ("Can't find the pack's DLL folder:`n  {0}`n`nExtract the DLSS 5 AIO release and run folder 06 from inside it, or point at the folder that holds the official DLLs:`n  .\DLSS-DLL-Refresher.ps1 -SourceDir 'D:\DLSS5-AIO\01-Official-NVIDIA-DLLs'" -f $dir)
     }
