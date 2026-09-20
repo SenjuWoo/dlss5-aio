@@ -15,7 +15,7 @@
 <p align="center">
   <a href="https://github.com/SenjuWoo/dlss5-aio/actions/workflows/ci.yml"><img src="https://github.com/SenjuWoo/dlss5-aio/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-8fa3b8?labelColor=0b1016" alt="MIT License"></a>
-  <a href="https://github.com/SenjuWoo/dlss5-aio/releases/tag/v1.4.2"><img src="https://img.shields.io/badge/release-v1.4.2-6b8cae?labelColor=0b1016" alt="v1.4.2"></a>
+  <a href="https://github.com/SenjuWoo/dlss5-aio/releases/tag/v1.4.3"><img src="https://img.shields.io/badge/release-v1.4.3-6b8cae?labelColor=0b1016" alt="v1.4.3"></a>
 </p>
 
 <p align="center">
@@ -34,10 +34,10 @@
 
 | | |
 | --- | --- |
-| **Latest release** | [v1.4.2](https://github.com/SenjuWoo/dlss5-aio/releases/tag/v1.4.2) (adds folder 06 — whole-PC DLL refresher) |
+| **Latest release** | [v1.4.3](https://github.com/SenjuWoo/dlss5-aio/releases/tag/v1.4.3) (adds folder 06 — whole-PC DLL refresher) |
 | **Official NVIDIA DLSS DLLs** | **310.9.1.0** — Super Resolution, Frame Generation, Ray Reconstruction (documented in [`01-Official-NVIDIA-DLLs/README.md`](01-Official-NVIDIA-DLLs/README.md); signed production builds in the release 7-Zip, hashed in [`SHA256SUMS.txt`](SHA256SUMS.txt)) |
 | **DLSS 5 neural-rendering runtime** | `nvngx_dlssnr.dll` **310.8.SF.0** (NVIDIA production build, unsigned; documented in [`02-DLSS5-Neural-Rendering/README.md`](02-DLSS5-Neural-Rendering/README.md)) |
-| **Tools** | DLSS5-Swapper **2.2.7** · DLSS5-Feeder **v0.6.0-beta.1** |
+| **Tools** | DLSS5-Swapper **2.2.7** · DLSS5-Feeder **v0.15.1** |
 | **Needs** | NVIDIA GPU · Windows 10/11 64-bit · **RTX 40/50** for DLSS 5 neural rendering |
 
 Download: [github.com/SenjuWoo/dlss5-aio/releases/latest](https://github.com/SenjuWoo/dlss5-aio/releases/latest). It is a 3-part 7-Zip (~635 MB total): download **all 3 parts** into one folder, right-click part `.001`, **Extract Here** (7-Zip), then open **`START-HERE.txt`**. This git clone is the docs + scripts tree — the large official DLLs live in the release archive, not in git.
@@ -82,7 +82,7 @@ DLSS5-AIO/
 │   ├── DLSS5_Feed.fx                 the feeder shader (→ reshade-shaders\Shaders)
 │   ├── reshade-shaders/              self-sufficient: feeder shader + ReShade core headers + must-have effects
 │   │   └── Shaders/                  Deband, Levels, LUT, DisplayDepth, Daltonize, UIMask, qUINT_common
-│   ├── feed-vk-layer.zip             only if a Vulkan game's log asks for it
+│   ├── layer-x64/ · layer-x86/       only if a Vulkan game's log asks for it
 │   └── host64/                       complete 64-bit helper env for 32-bit games
 │       ├── dlss5-feed-host64.exe     the helper process
 │       ├── dxgi.dll                  ReShade 6.8.0 (64-bit, add-on build)
@@ -96,7 +96,7 @@ DLSS5-AIO/
     └── DLSS-DLL-Refresher.ps1        whole-PC scan + swap, keeps originals
 ```
 
-*Provenance: this pack restructures the original `!!!DLSS mod` collection — `GOATED NEW` → folders `02` + `04`, `Older` → folder `05` — and adds the official `zofficialdlls` set as folder `01`, plus the missing 64-bit feeder pieces (`dlss5-feed.addon64`, `DLSS5_Feed.fx`, `feed-vk-layer.zip`). The `reshade-shaders` folder is the free-to-share set: feeder shader + ReShade core headers + standard effects (Deband, Levels, LUT, DisplayDepth, Daltonize, UIMask, qUINT_common) — motion-vector providers are *not* bundled (iMMERSE and LumeniteFX licenses forbid redistribution).*
+*Provenance: this pack restructures the original `!!!DLSS mod` collection — `GOATED NEW` → folders `02` + `04`, `Older` → folder `05` — and adds the official `zofficialdlls` set as folder `01`, plus the missing 64-bit feeder pieces (`dlss5-feed.addon64`, `DLSS5_Feed.fx`, `layer-x64/` · `layer-x86/`). The `reshade-shaders` folder is the free-to-share set: feeder shader + ReShade core headers + standard effects (Deband, Levels, LUT, DisplayDepth, Daltonize, UIMask, qUINT_common) — motion-vector providers are *not* bundled (iMMERSE and LumeniteFX licenses forbid redistribution).*
 
 ---
 
@@ -251,7 +251,7 @@ sha256sum -c SHA256SUMS.txt
 
 Verified in this tree:
 
-- latest GitHub release **v1.4.2** (adds folder `06` DLL refresher; DLSS 310.9.1.0, DLSSNR 310.8.SF.0, Swapper 2.2.7)
+- latest GitHub release **v1.4.3** (adds folder `06` DLL refresher; DLSS 310.9.1.0, DLSSNR 310.8.SF.0, Swapper 2.2.7)
 - documented official DLL versions **310.9.1.0** (SR/FG/RR) and neural runtime **310.8.SF.0** in folder READMEs
 - [SHA256SUMS.txt](SHA256SUMS.txt) hashes for every shipped file
 - CI (.github/workflows/ci.yml) runs scripts/check_release.py (doc pointers, license-forbidden shader paths, link check)
@@ -267,7 +267,7 @@ vngx_dlss*.dll binaries (they ship in the release 7-Zip)
 ## 🙏 Credits & licenses
 
 - **[NVIDIA](https://www.nvidia.com/en-us/geforce/technologies/dlss/)** — DLSS 5, official DLSS/Streamline DLLs (see Streamline folder for NIS/Reflex licenses)
-- **[jlrouzies-fr](https://github.com/jlrouzies-fr/DLSS5-Feeder)** — DLSS5-Feeder v0.6.0-beta.1
+- **[jlrouzies-fr](https://github.com/jlrouzies-fr/DLSS5-Feeder)** — DLSS5-Feeder v0.15.1
 - **[Rakan Alkhaldi (rakanki911)](https://github.com/rakanki911/DLSS5-Swapper)** — DLSS5-Swapper 2.2.7, MIT
 - **[RenoDX (clshortfuse)](https://github.com/clshortfuse/renodx)** — `renodx-dlss5.addon64` + `nvngx_dlssnr.dll` production build (RTX 40/50)
 - **[crosire](https://github.com/crosire/reshade)** — ReShade 6.8.0 (BSD-3-Clause)

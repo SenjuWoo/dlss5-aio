@@ -19,7 +19,7 @@ the pack is an assembly, a backup, and a convenience layer.
 | Component | Version | Author / source | License |
 |---|---|---|---|
 | **DLSS5-Swapper** (`DLSS5-Swapper-Setup-2.2.7.exe`) | 2.2.7 | Rakan Alkhaldi — github.com/rakanki911/DLSS5-Swapper · Nexus: nexusmods.com/site/mods/2228 | MIT |
-| **DLSS5-Feeder** (`dlss5-feed.addon64`, `dlss5-feed.addon32`, `DLSS5_Feed.fx`, `feed-vk-layer.zip`, `dlss5-feed-host64.exe`) | v0.6.0-beta.1 | jlrouzies-fr — github.com/jlrouzies-fr/DLSS5-Feeder | not declared on repo; distributed by author via GitHub Releases |
+| **DLSS5-Feeder** (`dlss5-feed.addon64`, `dlss5-feed.addon32`, `DLSS5_Feed.fx`, `layer-x64/`, `layer-x86/`, `dlss5-feed-host64.exe`) | v0.15.1 | jlrouzies-fr — github.com/jlrouzies-fr/DLSS5-Feeder | not declared on repo; distributed by author via GitHub Releases |
 | **`renodx-dlss5.addon64`** (DLSS 5 ReShade add-on) | 0.2026.827.2036 | RenoDX community (Discord) | closed source, community-distributed |
 | **`nvngx_dlssnr.dll`** (neural-rendering runtime) | 310.8.SF.0 | NVIDIA DLSSNR **production** build (`DVS PRODUCTION`), superseding the earlier RenoDX community build; ships unsigned (verified) | NVIDIA proprietary |
 | **ReShade** (`dxgi.dll` in `host64\`) | 6.8.0 (add-on build) | crosire — reshade.me | BSD-3-Clause |
@@ -49,7 +49,7 @@ UIMask and qUINT_common.
 ## Pack assembly
 
 - Assembled, documented, packaged: **ShugokiFable** (2026-08-31)
-- Source material: the original `!!!DLSS mod` collection (restructured into folders `01`–`05`) plus the official `zofficialdlls` NVIDIA DLL set (byte-verified against the packed copies), with the missing Feeder v0.6.0-beta.1 assets fetched from its GitHub release (`dlss5-feed.addon64`, `DLSS5_Feed.fx`, `feed-vk-layer.zip`). The `reshade-shaders` folder is the free-to-share set (core headers, Deband, Levels, LUT, DisplayDepth, Daltonize, UIMask, qUINT_common) — provider files deliberately excluded (iMMERSE: Pascal Gilcher license forbids public propagation; LumeniteFX: AGNYA license forbids redistribution).
+- Source material: the original `!!!DLSS mod` collection (restructured into folders `01`–`05`) plus the official `zofficialdlls` NVIDIA DLL set (byte-verified against the packed copies), with the Feeder assets taken from its official GitHub release v0.15.1 (`dlss5-feed.addon64`, `dlss5-feed.addon32`, `DLSS5_Feed.fx`, `layer-x64/`, `layer-x86/`, `dlss5-feed-host64.exe`) — byte-identical to what DLSS5-Swapper 2.2.7 installs into a game. The `reshade-shaders` folder is the free-to-share set (core headers, Deband, Levels, LUT, DisplayDepth, Daltonize, UIMask, qUINT_common) — provider files deliberately excluded (iMMERSE: Pascal Gilcher license forbids public propagation; LumeniteFX: AGNYA license forbids redistribution).
 - Known-working evidence: `dlss5-feed-host.log` from the pack owner's session — **Saints Row: The Third (32-bit), 2560×1440 DLAA, feature ready flags=66, 99,000+ frames evaluated** across a full play session.
 
 *If you are a listed author and want your component removed or re-credited differently, open an issue on the repo.*

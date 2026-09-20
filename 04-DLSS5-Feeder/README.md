@@ -24,7 +24,7 @@
 | `dlss5-feed.addon64` | 64-bit feeder add-on (executable ReShade add-on, not a shader) | **64-bit** games |
 | `dlss5-feed.addon32` | 32-bit feeder add-on — talks to the `host64` helper | **32-bit** games |
 | `DLSS5_Feed.fx` | The feeder shader (also inside `reshade-shaders\Shaders\`) | both |
-| `feed-vk-layer.zip` | Vulkan interop fallback — **only if a Vulkan game's log asks for it** | Vulkan |
+| `layer-x64/` · `layer-x86/` | Vulkan interop fallback — **only if a Vulkan game's log asks for it** | Vulkan |
 | `host64\` | The complete 64-bit helper environment for 32-bit games | **32-bit** games |
 
 ### The bundled `reshade-shaders\` folder (v1.3.1)
@@ -169,7 +169,7 @@ host bridge. See step 6 of the 32-bit install below.
 Same as 64-bit, but ReShade is a Vulkan **layer** (register the game exe in its installer;
 ensure `AddonPath=.\` under `[ADDON]` in `ReShade.ini`). The add-on adds the interop
 extensions itself; **only** if `dlss5-feed.log` reports missing interop entry points, unzip
-`feed-vk-layer.zip` and launch via its `run-with-feed-layer.bat`.
+`layer-x64/` (or `layer-x86/` for a 32-bit game) and launch via its `run-with-feed-layer.bat`.
 
 ---
 
@@ -258,6 +258,6 @@ via dgVoodoo2), DOOM 2016 (64-bit Vulkan).
 
 ## Source
 
-github.com/jlrouzies-fr/DLSS5-Feeder — v0.6.0-beta.1 (2026-08-30). Beta software: temporal
+github.com/jlrouzies-fr/DLSS5-Feeder — v0.15.1 (2026-09-09). Beta software: temporal
 quality of *estimated* motion vectors; HUD processed with the scene. Full documentation,
 configuration reference and building instructions live in the project's README.
