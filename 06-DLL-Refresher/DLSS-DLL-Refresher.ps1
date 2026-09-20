@@ -250,7 +250,7 @@ function Invoke-Refresher {
         }
         [void]$rows.Add($row)
     }
-    return $rows
+    return ,$rows   # comma keeps a 1-row result a collection; otherwise .Count comes back null
 }
 
 function Invoke-Restore {
@@ -287,13 +287,19 @@ function Show-Report {
 
     Write-Host "`n=== Files that need the update ===" -ForegroundColor Cyan
     if ($swap.Count -eq 0) { Write-Host "  (none - everything is current)" -ForegroundColor Green }
-    else { $swap | Format-Table @{L='have';E={$_.Have}}, @{L='want';E={$_.Want}}, @{L='note';E={$_.Note}}, Path -AutoSize | Out-String | Write-Host }
+    else {
+        # full paths on their own line: a Format-Table column silently truncates them
+        foreach ($r in $swap) {
+            Write-Host ("  {0} -> {1}   {2}" -f $r.Have, $r.Want, $r.Note)
+            Write-Host ("    {0}" -f $r.Path) -ForegroundColor DarkGray
+        }
+    }
 
     Write-Host "=== Left alone ===" -ForegroundColor DarkGray
-    $skip | Format-Table @{L='have';E={$_.Have}}, @{L='note';E={$_.Note}}, Path -AutoSize | Out-String | Write-Host
+    foreach ($r in $skip) { Write-Host ("  {0,-14} {1,-48} {2}" -f $r.Have, $r.Note, $r.Path) }
     if ($fail.Count -gt 0) {
         Write-Host "=== Failed ===" -ForegroundColor Red
-        $fail | Format-Table @{L='note';E={$_.Note}}, Path -AutoSize | Out-String | Write-Host
+        foreach ($r in $fail) { Write-Host ("  {0}   {1}" -f $r.Note, $r.Path) }
     }
 
     $online = @($skip | Where-Object { $_.Note -like '*anti-cheat*' })
@@ -357,6 +363,8 @@ function Invoke-SelfTest {
     Assert ((Get-Sha (Join-Path $ac $name)) -eq $src.Sha) '-ForceOnline overrides the online skip'
     $script:ForceOnline = $false
     Assert ((Get-Norm 'Marvel Rivals') -eq (Get-Norm 'MarvelRivals')) 'name matching ignores spaces'
+    $one = Invoke-Refresher -map $map -roots @($cur)
+    Assert ($one.Count -eq 1) 'a single-row result still reports a count'
 
     # version parsing: a build tag must not make a release line look newer/older than it is
     Assert ((Get-NumVersion '310.8.SF.0') -eq (Get-NumVersion '310,8,0,0')) 'build-tagged version equals its numeric form'
