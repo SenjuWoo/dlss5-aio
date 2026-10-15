@@ -1,3 +1,5 @@
+> Legacy v1.4.8 manual-pack snapshot. Versions and instructions below describe that archived payload. Use the current portable AIO release for verified current runtime downloads and game installation.
+
 # 05 — Legacy: OptiScaler & DLSS Enabler (the old way)
 
 > **⚠️ Pick ONE approach per game.** These are the *previous generation* of "DLSS on any

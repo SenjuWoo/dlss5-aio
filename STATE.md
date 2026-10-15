@@ -37,11 +37,16 @@ One portable game-focused application: discover games, update compatible NVIDIA/
 - `scripts/check_release.py`: 14 live external links checked, zero dead; restricted-file and documentation checks passed.
 - Root diff review clean after fixing missing Tcl notice fallback (CPython's license includes Tcl/Tk), same-size backup identity, CI exit-code masking and packaged source link.
 
+## Push / CI milestone
+- First implementation push: `bdd8cc53be4eaffd07fce5bfc1a1a334d1b909eb`. Link checks and dependency graph passed; Windows CI failed because its disposable fixture was under the protected `D:\a\dlss5-aio` tool-folder parent.
+- Corrected test fixture placement to use absolute `RUNNER_TEMP` when available; preserved production tool-folder protection. Simulated runner-temp fixtures passed all 45 checks on both PowerShell engines. Source/runtime downloads unchanged.
+- Numbered legacy README files now explicitly label the v1.4.8 manual-pack snapshot.
+
 ## Next unfinished step
-Commit/push final source, wait for exact-SHA CI/default CodeQL, query all security alerts, download the CI-built artifact and verify it locally, tag/publish from the green SHA, then compare downloaded public asset bytes. Rebuild package after the final documentation link edit; no unchanged runtime downloads/tests need repeating.
+Push the CI fixture correction, wait for exact-SHA CI/default CodeQL, query all security alerts, download the CI-built artifact and verify it locally, tag/publish from the green SHA, then compare downloaded public asset bytes. No unchanged runtime downloads/tests need repeating.
 
 ## Verification and release status
-Local build/package verified; no push or release yet. Last known-good is immutable GitHub tag v1.4.8; preserve it. Build: `scripts/Build-Release.ps1 -OutputDir <owned output folder>` (Python/PyInstaller 6.22.1). Run: `python app/dlss5_aio.py`; log `%LOCALAPPDATA%\dlss5-aio\aio.log`, debug via `--debug`/help toggle/`DLSS5_AIO_DEBUG=1`. Use the first non-WindowsApps interpreter from `where.exe python`; sandbox TEMP/TMP must point inside owned work/test-temp for tests.
+Local build/package and implementation push verified; release pending successful CI. Last known-good is immutable GitHub tag v1.4.8; preserve it. Build: `scripts/Build-Release.ps1 -OutputDir <owned output folder>` (Python/PyInstaller 6.22.1). Run: `python app/dlss5_aio.py`; log `%LOCALAPPDATA%\dlss5-aio\aio.log`, debug via `--debug`/help toggle/`DLSS5_AIO_DEBUG=1`. Use the first non-WindowsApps interpreter from `where.exe python`; sandbox TEMP/TMP must point inside owned work/test-temp for tests.
 - Refreshed gh authentication works outside sandbox (`gh api user` -> SenjuWoo); sandbox credential access returns 401. Use approved external credential access. No credentials printed or config overwritten.
 - Baseline live security query: Dependabot/code-scanning/secret-scanning all zero open alerts; code quality endpoints return 404 unavailable (left off). Requery after push/CI.
 

@@ -1,3 +1,5 @@
+> Legacy v1.4.8 manual-pack snapshot. Versions and instructions below describe that archived payload. Use the current portable AIO release for verified current runtime downloads and game installation.
+
 # 01 — Official NVIDIA DLSS DLLs (latest)
 
 **The official, NVIDIA-signed production builds** ("DVS PRODUCTION"). Drop them over a game's existing

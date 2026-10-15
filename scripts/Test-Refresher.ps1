@@ -5,7 +5,10 @@ param()
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
 $tool = Join-Path $repo '06-DLL-Refresher\DLSS-DLL-Refresher.ps1'
-$fixture = Join-Path (Split-Path -Parent $repo) ('refresher-tests-' + [guid]::NewGuid().ToString('N'))
+# GitHub's checkout parent is named dlss5-aio, which production correctly protects.
+$fixtureRoot = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { Split-Path -Parent $repo }
+$fixtureRoot = [IO.Path]::GetFullPath($fixtureRoot)
+$fixture = Join-Path $fixtureRoot ('refresher-tests-' + [guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory($fixture) | Out-Null
 $checks = 0
 $savedLocalAppData = $env:LOCALAPPDATA
@@ -21,8 +24,11 @@ $script:Apply = $false
 $script:ForceOnline = $false
 $name = 'dlss5-feed.addon64'
 
-function Check($Condition, [string]$Message) {
-    if (-not $Condition) { throw ('FAIL: ' + $Message) }
+function Check($Condition, [string]$Message, [string]$Details) {
+    if (-not $Condition) {
+        if ($Details) { Write-Host $Details }
+        throw ('FAIL: ' + $Message)
+    }
     $script:checks++
     Write-Host ('ok ' + $Message)
 }
@@ -62,7 +68,7 @@ try {
     $game = Game 'normal'
     $originalHash = Get-Sha $game
     $rows = Refresh $game
-    Check ($rows.Count -eq 1 -and $rows[0].Action -eq 'SWAP') 'dry run detects one update'
+    Check ($rows.Count -eq 1 -and $rows[0].Action -eq 'SWAP') 'dry run detects one update' ('Fixture: {0}; rows: {1}' -f $fixture, ($rows | ConvertTo-Json -Compress))
     Check ((Get-Sha $game) -eq $originalHash -and -not (Test-Path (Join-Path (Split-Path $game) '_dlss_originals'))) 'dry run writes no game files'
 
     $script:Apply = $true
@@ -222,8 +228,8 @@ try {
     Write-Host ('PASS: {0} functional refresher checks' -f $checks)
 } finally {
     $env:LOCALAPPDATA = $savedLocalAppData
-    # Remove only this invocation's verified workspace fixture.
-    $expectedParent = [IO.Path]::GetFullPath((Split-Path -Parent $repo)).TrimEnd('\')
-    if ([IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($fixture)) -ne $expectedParent) { throw 'Unsafe fixture cleanup path.' }
+    # Remove only this invocation's fixture under the exact selected temporary root.
+    $expectedParent = $fixtureRoot.TrimEnd('\')
+    if ([IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($fixture)).TrimEnd('\') -ne $expectedParent) { throw 'Unsafe fixture cleanup path.' }
     Remove-Item -LiteralPath $fixture -Recurse -Force
 }
