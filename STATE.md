@@ -21,7 +21,7 @@ One portable game-focused application: discover games, update compatible NVIDIA/
 - Root README/credits/licenses/changelog/start guide and source/provenance/audit docs updated. Public owner name is SenjuWoo. Legacy numbered-folder material remains a snapshot, not the new portable release.
 - Windows CI now runs each test as its own step (no masked earlier native failures), both PowerShell engines, pinned build tool and fresh-package checks. Existing GitHub default CodeQL remains enabled for Python and Actions; no duplicate advanced workflow is added.
 
-## Verified evidence
+## v2.0.0 verified evidence (historical)
 - `python -m unittest discover -s app/tests -p test_aio_*.py`: 20 passed after final byte-identity, source-placement and hostname fixes (actual Windows PE VERSIONINFO, filesystem/backup/restore, process/thread locking, strict CLI, namespace and injection-source checks).
 - `python -m unittest discover -s app/tests -p test_runtimecatalog.py`: 14 passed. Includes actual version agreement and serialized shared-cache writes. All 12 existing live DLLs passed the final changed validator again using cache only.
 - `app/tests/test_scan.py`: 23 passed; `test_reshade_ini.py`: 6 scenarios passed. Logs in the parent work directory.
@@ -44,7 +44,7 @@ One portable game-focused application: discover games, update compatible NVIDIA/
 - Numbered legacy README files now explicitly label the v1.4.8 manual-pack snapshot.
 
 ## Next unfinished step
-Push the frozen v2.0.1 audit fixes/docs, converge exact-SHA CI/security, download and retest that CI artifact, then publish and independently verify public bytes. Baseline is `bd4752e66f361fc0ad77f5bbf003f6423941dfde`. Local source/build/native gates passed below. v2.0.0 tags/assets remain unchanged, but its release notes warn about the reproduced recovery defects. No real games/profiles have been changed. Reuse immutable component downloads.
+No implementation or publication step remains for v2.0.1. Its release source, exact-SHA CI/security, package/native tests and public bytes are verified below. Final documentation-only HEAD convergence is recorded in outputs/HANDOFF.md to avoid a self-referencing state commit. On a new resume inspect Git and that handoff before repeating anything; preserve the published tag and reuse unchanged component evidence. No real games/profiles have been changed.
 
 ## Whole-project re-audit implementation
 - No personal edits present at the start; no game or user settings will be changed by audit fixtures.
@@ -62,7 +62,18 @@ Push the frozen v2.0.1 audit fixes/docs, converge exact-SHA CI/security, downloa
 - Final cached publisher-component fixture passed x64/x86 install, route switching and full restoration without new downloads. Original fixture EXEs and persistent AIO locks were the only remaining files; shader execution and registry transports are substituted.
 - Actual native report/share forms captured and visually inspected after correcting an occluded initial capture: content fits, submit gating works, cancel opens no browser, zero callback errors (`product-native-report.json`). Native comparison exports preserve concurrent PNGs and correct decoded pixels.
 - Local PyInstaller 6.22.1 build/package passed fresh extraction, licenses/payload boundaries, real EXE version/self-test/invalid CLI (`build-local.log`). Extracted native 2.0.1 GUI opened, was captured/inspected, closed and exited zero with no ERROR log (`local-native-gui.log`). Local candidate is parent work/audit-v2/local-build; release will use the exact green CI artifact instead.
-- Release checker: 15 external links checked, zero dead; restricted-file and docs checks passed. New audit/recovery/source docs reviewed. No v2.0.1 release is published yet; CI/security/public bytes remain unfinished.
+- Release checker: 15 external links checked, zero dead; restricted-file and docs checks passed. New audit/recovery/source docs reviewed. Publication completed below.
+
+## v2.0.1 corrected CI candidate
+- Corrected pushed source: `94ef9d98ae1810ba14031dceb8f0f1123c9f1721`; local 142-test integrated rerun passed after the short-path fix. CI `38818633156` and CodeQL `38818632642` terminal success: all four exact-SHA checks passed. Post-analysis Dependabot/code-scanning/secret-scanning queries returned zero open alerts (`green-source-proof.json`). Code quality unavailable (404), left off.
+- CI artifact `12011163324` is tied to that exact source. Downloaded to parent work/audit-v2/ci-94ef9d9 and retested fresh ZIP extraction, payload/licenses, packaged version/self-test/invalid CLI, native GUI open/capture/close/exit 0 with no ERROR log. PE owner/version match SenjuWoo/2.0.1.0. Native capture inspected: parent work/frozen-ui-ci-94ef9d9.png; isolated log parent work/frozen-ui-profile-ci-94ef9d9/dlss5-aio/aio.log.
+- Verified EXE: 13,624,069 bytes, SHA256 `2a13879be3e3d16f73fb8795f0c295cf427b3e95317732966e64edb1553ed50d`; ZIP: 13,420,614 bytes, SHA256 `cdc3441b91d98eb0f03f762f0ac9d91f308b37b1595f1edcc32d9c45d022ec56`; SHA256SUMS: 177 bytes, SHA256 `3a3bc7f5a91ca5242932f37eab66ef6c26c4bcfef3864cb9ed625de634a2cefc`. All match CI checksum records (`ci-package-proof.json`).
+
+## v2.0.1 publication proof
+- Published https://github.com/SenjuWoo/dlss5-aio/releases/tag/v2.0.1 on October 15, 2026. Non-draft, non-prerelease, latest. Tag resolves exactly to green source `94ef9d98ae1810ba14031dceb8f0f1123c9f1721`.
+- Independently downloaded all three public assets without authentication to parent work/public-v2.0.1-94ef9d9. Every file is nonempty and its size/SHA256 equals the tested CI artifact and outputs copy. Proof: parent work/public-v2.0.1-proof.json. No source or binary rebuilt after CI.
+- Outputs now contain the full 2.0.1 portable ZIP, standalone EXE, SHA256SUMS, AUDIT-REPORT.md, HANDOFF.md and CHANGELOG-PUBLISH.txt. Prior 2.0.0 local assets are retained in parent work/published-v2.0.0-retained; its GitHub tag/assets are unchanged and its release notes retain the recovery warning. v1.4.8 remains the historical manual-pack baseline.
+- Exact gaps: no actual-game rendering/FPS or Vulkan/OpenXR/VR session, no full legacy binary-pack audit or complete large upstream reference-suite execution. Historical hashless originals/records need conservative review; no update can reconstruct already lost bytes. AMD/Intel are dated snapshot pins, the EXE is unsigned, and third-party writers do not share AIO locks. Report redaction covers common patterns, not guaranteed anonymity of arbitrary prose.
 
 ## CodeQL fix milestone
 - Both production HTTP readers now classify GitHub rate limits using the exact parsed hostname. Regression covers 24 reader/status/URL combinations including suffix, path, query and credential spoofing.
@@ -80,13 +91,13 @@ Push the frozen v2.0.1 audit fixes/docs, converge exact-SHA CI/security, downloa
 - Downloaded CI artifact `11944856876` from that exact SHA. Fresh ZIP extraction, packaged version/self-test/invalid CLI passed locally. Its native GUI opened, was captured/inspected, closed and exited zero with no ERROR log, using isolated settings.
 - Promoted unchanged verified bytes to outputs: EXE 13,582,294 bytes SHA256 `afbc0cf4e2a717630a94da76bd06b25e83d9423d8aac334455cc6d775bdd37b5`; ZIP 13,372,627 bytes SHA256 `d2e6927e244ab2c4c3e53804bdb286b892e1cb71105017e6a17e0c3b8656d8dd`. Both match CI SHA256SUMS.
 
-## Publication proof
-- Published https://github.com/SenjuWoo/dlss5-aio/releases/tag/v2.0.0 on October 15, 2026. Non-draft, non-prerelease, latest. Tag resolves exactly to green source `8178e0ac45f03d7fc3a279583aaf397f8587c4f2`.
+## v2.0.0 publication proof (historical)
+- Published https://github.com/SenjuWoo/dlss5-aio/releases/tag/v2.0.0 on October 15, 2026. Non-draft, non-prerelease; latest at publication, now superseded by v2.0.1. Tag resolves exactly to green source `8178e0ac45f03d7fc3a279583aaf397f8587c4f2`.
 - Downloaded all three public assets without authentication into fresh parent work/public-v2.0.0-8178e0a. Nonempty sizes and SHA256 match the verified CI files exactly. Proof: parent work/public-v2.0.0-proof.json. Checksum asset is 177 bytes, SHA256 `e79c7a5c70560b4711eec29fca658bc609bcdc7f5098ff8a04413bd3b2e31240`.
 - Outputs/HANDOFF.md contains the release/source/check links, hashes, log location and exact remaining runtime limits. Outputs/CHANGELOG-PUBLISH.txt contains the ready-to-paste v1.4.8 -> v2.0.0 changelog. Final documentation-only commit does not change the released application bytes.
 
 ## Verification and release status
-v2.0.0 source, exact-SHA CI/security, native/package checks, publication and public bytes are verified. Immutable GitHub tag v1.4.8 remains the prior rollback baseline. Build: `scripts/Build-Release.ps1 -OutputDir <owned output folder>` (Python/PyInstaller 6.22.1). Run: `python app/dlss5_aio.py`; log `%LOCALAPPDATA%\dlss5-aio\aio.log`, debug via `--debug`/help toggle/`DLSS5_AIO_DEBUG=1`. Use the first non-WindowsApps interpreter from `where.exe python`; sandbox TEMP/TMP must point inside owned work/test-temp for tests.
+v2.0.1 source, exact-SHA CI/security, native/package checks, publication and public bytes are verified. Earlier tags remain immutable historical baselines; v2.0.0 recovery defects are documented and fixed in 2.0.1. Build: `scripts/Build-Release.ps1 -OutputDir <owned output folder>` (Python/PyInstaller 6.22.1). Run: `python app/dlss5_aio.py`; log `%LOCALAPPDATA%\dlss5-aio\aio.log`, debug via `--debug`/help toggle/`DLSS5_AIO_DEBUG=1`. Use the first non-WindowsApps interpreter from `where.exe python`; sandbox TEMP/TMP must point inside owned work/test-temp for tests.
 - Refreshed gh authentication works outside sandbox (`gh api user` -> SenjuWoo); sandbox credential access returns 401. Use approved external credential access. No credentials printed or config overwritten.
 - Baseline live security query: Dependabot/code-scanning/secret-scanning all zero open alerts; code quality endpoints return 404 unavailable (left off). Requery after push/CI.
 
