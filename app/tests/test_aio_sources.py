@@ -2,6 +2,7 @@
 import sys
 import tempfile
 import unittest
+import urllib.error
 from pathlib import Path
 from unittest.mock import patch
 
@@ -9,10 +10,30 @@ APP = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(APP))
 sys.path.insert(0, str(APP / "_tools"))
 from fake_pe import dll
-from core import installer, runtimecatalog, sources
+from core import installer, net, runtimecatalog, sources
 
 
 class InstallerRuntimeSources(unittest.TestCase):
+    def test_only_exact_github_api_host_is_classified_as_rate_limited(self):
+        urls = (
+            ("https://api.github.com/repos/example/repo/releases", True),
+            ("https://API.GITHUB.COM/repos/example/repo/releases", True),
+            ("https://api.github.com.example.invalid/releases", False),
+            ("https://example.invalid/api.github.com/releases", False),
+            ("https://example.invalid/?next=api.github.com", False),
+            ("https://api.github.com@example.invalid/releases", False),
+        )
+        for read in (sources._get, net.fetch_text):
+            for code in (403, 429):
+                for url, api in urls:
+                    with self.subTest(read=read.__name__, code=code, url=url), \
+                            patch.object(net, "ssl_context", return_value=None), \
+                            patch.object(net.urllib.request, "urlopen",
+                                         side_effect=urllib.error.HTTPError(url, code, "fixture", None, None)):
+                        expected = sources.RateLimited if api else urllib.error.HTTPError
+                        with self.assertRaises(expected):
+                            read(url)
+
     def test_auto_uses_newest_verified_runtime_and_keeps_sdk_choice(self):
         with patch.object(sources, "latest_tag", side_effect=AssertionError("network")):
             catalog = sources.nvidia_dlss()

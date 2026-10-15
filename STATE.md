@@ -44,7 +44,18 @@ One portable game-focused application: discover games, update compatible NVIDIA/
 - Numbered legacy README files now explicitly label the v1.4.8 manual-pack snapshot.
 
 ## Next unfinished step
-Push the CI fixture correction, wait for exact-SHA CI/default CodeQL, query all security alerts, download the CI-built artifact and verify it locally, tag/publish from the green SHA, then compare downloaded public asset bytes. No unchanged runtime downloads/tests need repeating.
+Push the five CodeQL fixes, converge CI/CodeQL and open-alert queries on that SHA, promote its new CI artifact, then tag/publish and verify public downloads. No unchanged runtime downloads/tests need repeating.
+
+## CodeQL fix milestone
+- Both production HTTP readers now classify GitHub rate limits using the exact parsed hostname. Regression covers 24 reader/status/URL combinations including suffix, path, query and credential spoofing.
+- Three inherited reference-test oracles now inspect actual error behavior and exact host tokens rather than loose domain substrings. All seven changed-oracle checks passed.
+- Final application suite is now 20 passing tests; syntax and git diff checks passed. No alert was dismissed. The earlier 011cfcdd artifacts are superseded candidates and must not be published after these source changes.
+
+## CI artifact milestone
+- Candidate source: `011cfcdd912ea07abe71d1e764dcb5407710a533`. CI run `38671370899` and default CodeQL run `38671370379` both terminal success; all four check runs green. Post-scan query found five open `py/incomplete-url-substring-sanitization` findings: production `app/core/net.py:608`, `app/core/sources.py:348`; upstream reference tests `app/tests/test_all.py:8156,9290,9648`. These classify GitHub rate-limit errors via a substring rather than parsed hostname. Fixing all before release; no alert dismissed. Dependabot and secret-scanning remain zero; code quality unavailable 404.
+- Downloaded CI artifact `11943603467` (`DLSS5-AIO-win-x64`) from that exact source SHA. Retested fresh extraction and real packaged version/self-test/invalid CLI locally; launched/captured/closed its native GUI with exit 0 and no ERROR log. PE product/owner/version metadata correct.
+- Promoted unchanged CI-built bytes to the task's outputs folder. EXE 13,582,288 bytes SHA256 `6a35bb0c7d37726e77930209dc37507eebf5b69d36bd7cd37630d21b65003eea`; ZIP 13,372,835 bytes SHA256 `da4516e8e33f452536d8962bc8d66f6a5ff8ef353ab8f10add9dbe913d23fefe`. SHA256SUMS covers both. Prior local build differs; publish these CI artifacts, not a new local rebuild.
+- Release notes are prepared in parent work/release-notes.txt. Copy-paste platform changelog is in outputs/CHANGELOG-PUBLISH.txt. Publication and unauthenticated public download proof still pending.
 
 ## Verification and release status
 Local build/package and implementation push verified; release pending successful CI. Last known-good is immutable GitHub tag v1.4.8; preserve it. Build: `scripts/Build-Release.ps1 -OutputDir <owned output folder>` (Python/PyInstaller 6.22.1). Run: `python app/dlss5_aio.py`; log `%LOCALAPPDATA%\dlss5-aio\aio.log`, debug via `--debug`/help toggle/`DLSS5_AIO_DEBUG=1`. Use the first non-WindowsApps interpreter from `where.exe python`; sandbox TEMP/TMP must point inside owned work/test-temp for tests.

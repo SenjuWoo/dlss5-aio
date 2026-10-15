@@ -13,6 +13,7 @@ import shutil
 import ssl
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -605,7 +606,7 @@ def fetch_text(url: str, _try: int = 0) -> bytes:
         # (HTTPError is a URLError; the checks below apply to it only)
         # Same anonymous API allowance as sources._get; keep the message
         # identical so the user sees one clear explanation either way.
-        if e.code in (403, 429) and "api.github.com" in url:
+        if e.code in (403, 429) and urllib.parse.urlsplit(url).hostname == "api.github.com":
             raise sources.RateLimited(
                 "GitHub is rate limiting this connection (60 anonymous API "
                 "requests per hour). Wait an hour and try again, or use a VPN / "

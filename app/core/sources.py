@@ -345,7 +345,7 @@ def _get(url: str, timeout: int = 60, attempts: int = 3) -> bytes:
                                         context=net.ssl_context()) as r:
                 return r.read()
         except urllib.error.HTTPError as e:
-            if e.code in (403, 429) and "api.github.com" in url:
+            if e.code in (403, 429) and urllib.parse.urlsplit(url).hostname == "api.github.com":
                 raise RateLimited(
                     "GitHub is rate limiting this connection (60 anonymous API "
                     "requests per hour). Wait an hour and try again, or use a VPN / "

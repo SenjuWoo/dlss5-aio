@@ -8152,8 +8152,21 @@ _x7 = src_of(optiscaler.extract_7z)
 _i_7z, _i_tar = _x7.find("_seven_zip()"), _x7.find("_tar_exe()")
 check("a .7z is opened with 7-Zip before Windows' tar.exe",
       0 <= _i_7z < _i_tar, (_i_7z, _i_tar))
-check("...and the LZMA failure says what to install",
-      "lzma" in _x7.lower() and "7-zip.org" in _x7.lower())
+with tempfile.TemporaryDirectory() as _lzma_fixture:
+    _lzma_dir = Path(_lzma_fixture)
+    _lzma_tar = _lzma_dir / "tar.exe"
+    _lzma_tar.touch()
+    with patch.object(optiscaler, "_seven_zip", return_value=None), \
+            patch.object(optiscaler, "_tar_exe", return_value=_lzma_tar), \
+            patch.object(optiscaler, "_seven_zr_extract", return_value=False), \
+            patch.object(optiscaler.subprocess, "run", return_value=subprocess.CompletedProcess([], 1, "", "unsupported LZMA")):
+        try:
+            optiscaler.extract_7z(_lzma_dir / "fixture.7z", _lzma_dir / "out")
+            _lzma_message = ""
+        except RuntimeError as _lzma_error:
+            _lzma_message = str(_lzma_error)
+    check("...and the LZMA failure says what to install",
+          "lzma" in _lzma_message.lower() and "(7-zip.org)" in _lzma_message.split(), _lzma_message)
 check("...and 7-Zip is looked for on PATH and in Program Files",
       all(x in src_of(optiscaler._seven_zip)
           for x in ("shutil.which", "Program Files")))
@@ -9287,7 +9300,7 @@ try:
     except RuntimeError as e:
         _msg140 = str(e)
     check("an HTML page served for a .zip raises, names the host and leaves no cache file (#140)",
-          "github.com" in _msg140 and "Nothing was written" in _msg140
+          _msg140.split()[1:2] == ["github.com"] and "Nothing was written" in _msg140
           and "DOCTYPE" in _msg140 and not (_c140 / "bad140.zip").exists()
           and not (_c140 / "bad140.zip.part").exists() and _serve140["n"] == 1, _msg140)
     try:
@@ -9645,7 +9658,7 @@ _root = str(net.untrusted("api.github.com", Exception(
     "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to "
     "get local issuer certificate")))
 check("a missing root still gets the answer that fixes a missing root (#54)",
-      "Edge" in _root and "api.github.com" in _root, _root[:90])
+      "Edge" in _root and _root.partition(": ")[0] == "api.github.com", _root[:90])
 check("nothing but a verification failure is claimed as one",
       net.untrusted("x", Exception("timed out")) is None)
 
