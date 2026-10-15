@@ -10,7 +10,7 @@ One portable game-focused application: discover games, update compatible NVIDIA/
 - NVIDIA primary announcement (2026-10-13): https://www.nvidia.com/en-us/geforce/news/dlss-5-faster-ai-model-hogwarts-legacy-rtx-spark-laptops/ . The 2x faster NR model debuts October 16; do not label it available on October 14. Frame Generation Preset C beta is separate.
 - Installed DLSS 5 Autopilot identifies upstream `Kizzuwatnaa/DLSS5-Autopilot` (MIT); inspect its reusable game routes before creating replacements.
 - .NET SDKs 8.0.418 and 10.0.301 available. PATH's first Python is a broken Windows Store alias; resolve a real interpreter from `where.exe python` instead.
-- gh CLI authentication is invalid. Connected GitHub MCP authenticated as SenjuWoo and confirms admin/push permissions; use that route if CLI remains unavailable. Never print credentials.
+- Initial gh CLI credential was invalid; later refreshed and verified as SenjuWoo outside the sandbox. No credentials printed or personal Git settings changed.
 - Local installed apps, DLL collections and game folders are read-only references. No game or personal settings changed.
 
 ## Implementation milestone
@@ -22,7 +22,7 @@ One portable game-focused application: discover games, update compatible NVIDIA/
 - Windows CI now runs each test as its own step (no masked earlier native failures), both PowerShell engines, pinned build tool and fresh-package checks. Existing GitHub default CodeQL remains enabled for Python and Actions; no duplicate advanced workflow is added.
 
 ## Verified evidence
-- `python -m unittest discover -s app/tests -p test_aio_*.py`: 19 passed after final byte-identity and source-placement changes (actual Windows PE VERSIONINFO, filesystem/backup/restore, process/thread locking, strict CLI, namespace and injection-source checks).
+- `python -m unittest discover -s app/tests -p test_aio_*.py`: 20 passed after final byte-identity, source-placement and hostname fixes (actual Windows PE VERSIONINFO, filesystem/backup/restore, process/thread locking, strict CLI, namespace and injection-source checks).
 - `python -m unittest discover -s app/tests -p test_runtimecatalog.py`: 14 passed. Includes actual version agreement and serialized shared-cache writes. All 12 existing live DLLs passed the final changed validator again using cache only.
 - `app/tests/test_scan.py`: 23 passed; `test_reshade_ini.py`: 6 scenarios passed. Logs in the parent work directory.
 - `scripts/Test-Refresher.ps1`: 45 functional checks passed on both Windows PowerShell 5.1 and PowerShell 7; final logs `refresher-final-ps51.log` and `refresher-final-ps7.log`. Fixed inherited module-path hash discovery and a false-positive batch oracle.
@@ -44,7 +44,7 @@ One portable game-focused application: discover games, update compatible NVIDIA/
 - Numbered legacy README files now explicitly label the v1.4.8 manual-pack snapshot.
 
 ## Next unfinished step
-Push the five CodeQL fixes, converge CI/CodeQL and open-alert queries on that SHA, promote its new CI artifact, then tag/publish and verify public downloads. No unchanged runtime downloads/tests need repeating.
+Implementation, release gates and public-byte proof are complete. Next runtime validation is an actual game session followed by **did it work?**; no game launch, save or personal settings were modified by this task. Future AMD/Intel SDK catalog refreshes remain a maintained snapshot rather than automatic SDK discovery.
 
 ## CodeQL fix milestone
 - Both production HTTP readers now classify GitHub rate limits using the exact parsed hostname. Regression covers 24 reader/status/URL combinations including suffix, path, query and credential spoofing.
@@ -54,13 +54,24 @@ Push the five CodeQL fixes, converge CI/CodeQL and open-alert queries on that SH
 ## CI artifact milestone
 - Candidate source: `011cfcdd912ea07abe71d1e764dcb5407710a533`. CI run `38671370899` and default CodeQL run `38671370379` both terminal success; all four check runs green. Post-scan query found five open `py/incomplete-url-substring-sanitization` findings: production `app/core/net.py:608`, `app/core/sources.py:348`; upstream reference tests `app/tests/test_all.py:8156,9290,9648`. These classify GitHub rate-limit errors via a substring rather than parsed hostname. Fixing all before release; no alert dismissed. Dependabot and secret-scanning remain zero; code quality unavailable 404.
 - Downloaded CI artifact `11943603467` (`DLSS5-AIO-win-x64`) from that exact source SHA. Retested fresh extraction and real packaged version/self-test/invalid CLI locally; launched/captured/closed its native GUI with exit 0 and no ERROR log. PE product/owner/version metadata correct.
-- Promoted unchanged CI-built bytes to the task's outputs folder. EXE 13,582,288 bytes SHA256 `6a35bb0c7d37726e77930209dc37507eebf5b69d36bd7cd37630d21b65003eea`; ZIP 13,372,835 bytes SHA256 `da4516e8e33f452536d8962bc8d66f6a5ff8ef353ab8f10add9dbe913d23fefe`. SHA256SUMS covers both. Prior local build differs; publish these CI artifacts, not a new local rebuild.
-- Release notes are prepared in parent work/release-notes.txt. Copy-paste platform changelog is in outputs/CHANGELOG-PUBLISH.txt. Publication and unauthenticated public download proof still pending.
+- Those initial candidate bytes were superseded by the hostname fix. Do not publish the old local or 011cfcdd build.
+- Release notes originated in parent work/release-notes.txt. Copy-paste platform changelog is in outputs/CHANGELOG-PUBLISH.txt. Publication and public proof completed below.
+
+## Corrected CI artifact milestone
+- Pushed `8178e0ac45f03d7fc3a279583aaf397f8587c4f2`; CI run `38673144602` and CodeQL run `38673144499` terminal success. All four exact-SHA checks passed. All five findings closed through code fixes; no alert dismissed. Post-scan Dependabot, code-scanning and secret-scanning open-alert queries all returned zero. Code quality remains unavailable (404), left off.
+- Downloaded CI artifact `11944856876` from that exact SHA. Fresh ZIP extraction, packaged version/self-test/invalid CLI passed locally. Its native GUI opened, was captured/inspected, closed and exited zero with no ERROR log, using isolated settings.
+- Promoted unchanged verified bytes to outputs: EXE 13,582,294 bytes SHA256 `afbc0cf4e2a717630a94da76bd06b25e83d9423d8aac334455cc6d775bdd37b5`; ZIP 13,372,627 bytes SHA256 `d2e6927e244ab2c4c3e53804bdb286b892e1cb71105017e6a17e0c3b8656d8dd`. Both match CI SHA256SUMS.
+
+## Publication proof
+- Published https://github.com/SenjuWoo/dlss5-aio/releases/tag/v2.0.0 on October 15, 2026. Non-draft, non-prerelease, latest. Tag resolves exactly to green source `8178e0ac45f03d7fc3a279583aaf397f8587c4f2`.
+- Downloaded all three public assets without authentication into fresh parent work/public-v2.0.0-8178e0a. Nonempty sizes and SHA256 match the verified CI files exactly. Proof: parent work/public-v2.0.0-proof.json. Checksum asset is 177 bytes, SHA256 `e79c7a5c70560b4711eec29fca658bc609bcdc7f5098ff8a04413bd3b2e31240`.
+- Outputs/HANDOFF.md contains the release/source/check links, hashes, log location and exact remaining runtime limits. Outputs/CHANGELOG-PUBLISH.txt contains the ready-to-paste v1.4.8 -> v2.0.0 changelog. Final documentation-only commit does not change the released application bytes.
 
 ## Verification and release status
-Local build/package and implementation push verified; release pending successful CI. Last known-good is immutable GitHub tag v1.4.8; preserve it. Build: `scripts/Build-Release.ps1 -OutputDir <owned output folder>` (Python/PyInstaller 6.22.1). Run: `python app/dlss5_aio.py`; log `%LOCALAPPDATA%\dlss5-aio\aio.log`, debug via `--debug`/help toggle/`DLSS5_AIO_DEBUG=1`. Use the first non-WindowsApps interpreter from `where.exe python`; sandbox TEMP/TMP must point inside owned work/test-temp for tests.
+v2.0.0 source, exact-SHA CI/security, native/package checks, publication and public bytes are verified. Immutable GitHub tag v1.4.8 remains the prior rollback baseline. Build: `scripts/Build-Release.ps1 -OutputDir <owned output folder>` (Python/PyInstaller 6.22.1). Run: `python app/dlss5_aio.py`; log `%LOCALAPPDATA%\dlss5-aio\aio.log`, debug via `--debug`/help toggle/`DLSS5_AIO_DEBUG=1`. Use the first non-WindowsApps interpreter from `where.exe python`; sandbox TEMP/TMP must point inside owned work/test-temp for tests.
 - Refreshed gh authentication works outside sandbox (`gh api user` -> SenjuWoo); sandbox credential access returns 401. Use approved external credential access. No credentials printed or config overwritten.
 - Baseline live security query: Dependabot/code-scanning/secret-scanning all zero open alerts; code quality endpoints return 404 unavailable (left off). Requery after push/CI.
 
 ## Scope and limits
 Updating a DLL cannot create engine integration. Native runtime refresh and neural injection must remain distinct. API/bitness/runtime availability must determine the route. No claim of universal compatibility or anti-cheat safety without evidence.
+- No new actual-game visual/FPS benchmark, Vulkan/OpenXR/VR session, or full legacy pack binary audit. Large upstream reference suite is retained, not a completed release gate. Application EXE is unsigned. AMD/Intel are verified dated pins; incompatible/static FSR and unknown/32-bit maintenance DLLs are preserved.
