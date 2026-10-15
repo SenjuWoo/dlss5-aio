@@ -40,6 +40,7 @@ One portable game-focused application: discover games, update compatible NVIDIA/
 ## Push / CI milestone
 - First implementation push: `bdd8cc53be4eaffd07fce5bfc1a1a334d1b909eb`. Link checks and dependency graph passed; Windows CI failed because its disposable fixture was under the protected `D:\a\dlss5-aio` tool-folder parent.
 - Corrected test fixture placement to use absolute `RUNNER_TEMP` when available; preserved production tool-folder protection. Simulated runner-temp fixtures passed all 45 checks on both PowerShell engines. Source/runtime downloads unchanged.
+- Follow-up `6a53584464f252e576795e657fdcf0808d43d322`: all 45 hosted refresher checks passed, but Actions inherited exit 1 from the intentionally refused concurrent child command. Successful test completion now resets LASTEXITCODE to zero; failure assertions still throw. Verify with Actions' dot-source/exit wrapper, not only `powershell -File`.
 - Numbered legacy README files now explicitly label the v1.4.8 manual-pack snapshot.
 
 ## Next unfinished step

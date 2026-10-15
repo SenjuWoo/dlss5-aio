@@ -226,6 +226,8 @@ try {
     } finally { $mutex.ReleaseMutex(); $mutex.Dispose() }
     Check (@(Get-ChildItem -LiteralPath $fixture -Recurse -File | Where-Object { $_.Name -match '\.(tmp|rollback)$' }).Count -eq 0) 'failed and successful transactions leave no temporary files'
     Write-Host ('PASS: {0} functional refresher checks' -f $checks)
+    # Expected failing child commands must not leak into Actions' final exit-code wrapper.
+    $global:LASTEXITCODE = 0
 } finally {
     $env:LOCALAPPDATA = $savedLocalAppData
     # Remove only this invocation's fixture under the exact selected temporary root.
