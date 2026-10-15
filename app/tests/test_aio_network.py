@@ -184,7 +184,7 @@ class NetworkBoundaries(unittest.TestCase):
             seen.append(target)
         result = net.extract_tree(archive, "Shaders", "", self.root, writer=writer)
         self.assertEqual(result, [destination])
-        self.assertEqual(seen, [destination])
+        self.assertEqual([path.resolve() for path in seen], [destination.resolve()])
         self.assertEqual(destination.read_bytes(), b"personal")
 
     def test_unpacked_cache_tracks_archive_and_detects_modified_files(self):

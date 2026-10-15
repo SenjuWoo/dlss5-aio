@@ -117,6 +117,14 @@ class ProductTests(unittest.TestCase):
         game = self.root / "Game"
         self.assertTrue(fault_in_this_folder(SimpleNamespace(module=str(game / "hook.dll")), game))
         self.assertFalse(fault_in_this_folder(SimpleNamespace(module=str(self.root / "Game-old" / "hook.dll")), game))
+        if sys.platform == "win32":
+            import ctypes
+            game.mkdir()
+            module = game / "hook.dll"
+            module.touch()
+            short = ctypes.create_unicode_buffer(32768)
+            self.assertTrue(ctypes.windll.kernel32.GetShortPathNameW(str(module), short, len(short)))
+            self.assertTrue(fault_in_this_folder(SimpleNamespace(module=short.value), game.resolve()))
 
     def test_quit_waits_for_worker_and_stops_autopilot_before_destroying_window(self):
         control = WatchControl()

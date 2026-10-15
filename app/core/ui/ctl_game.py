@@ -167,9 +167,10 @@ def fault_in_this_folder(crash, install_dir) -> bool:
         return True
     try:
         here = str(Path(install_dir).resolve()).replace("/", "\\").lower()
+        there = str(Path(mod).resolve()).replace("/", "\\").lower()
     except (OSError, ValueError, TypeError):
         return True
-    return mod.lower().startswith(here.rstrip("\\") + "\\")
+    return there.startswith(here.rstrip("\\") + "\\")
 
 
 # OptiScaler's own unload. A process that faults does not write it: Windows
