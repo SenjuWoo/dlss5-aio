@@ -7,9 +7,12 @@ Its copyright and license are retained in `UPSTREAM-LICENSE.txt`.
 
 DLSS 5 AIO separates its profile, cache, log, application mutex and updater from
 Autopilot. Existing Autopilot preferences are neither imported nor overwritten.
-The game-directory install manifest and backup suffixes remain interoperable so
-existing originals and restoration records remain recognizable. Do not run two
-installer applications against the same game concurrently.
+The game-directory manifest and backup suffixes remain recognizable, but the
+v2.0.1 fork adds byte-ownership hashes and durable checkpoints. Earlier records
+without hashes cannot certify originals retroactively: unknown files and
+backups are retained, and some legacy restoration requires manual review.
+Other installer applications do not honor AIO's game/profile/cache locks;
+close them before modifying the same files.
 
 Video, screen capture and image processing are excluded from this application's
 interface and CLI. The internal video helper remains because shared upstream
@@ -23,7 +26,24 @@ with DLL maintenance: version 310.9.16 from the RHI community mirror is the
 automatic choice, with NVIDIA SDK 310.9.1 retained as a selectable fallback.
 The installer validates these downloads before preserving or replacing a game
 file. Neural-rendering runtime selection remains separate and GPU-aware;
-updating SR/RR/FG does not provide a newer neural-rendering model.
+updating SR/RR/FG does not provide a newer neural-rendering model. The listed
+versions are the October 14 snapshot. Refreshed mirror DLLs without a bundled
+extracted-DLL pin require a freshly verified valid NVIDIA publisher signature;
+known exact SHA256 pins can be reused offline.
+
+The October 15 v2.0.1 re-audit adds source-bound and bounded downloads,
+preflighted archives, bounded/reaped extractor processes, whole-package
+self-update checks, staged config/tuning writes and failure-aware restoration.
+Per-game registry changes and global layer references retain recovery evidence
+before mutation. Settings, profiles, own-FG recipes and tune histories use the
+shared profile mutation lock. Runtime detection distinguishes an actual
+upscaling integration from generic backend/frame-generation files.
+
+Reporting now redacts common private values before preparing a GitHub issue
+form. Opening that browser URL transmits its prefilled details to GitHub;
+publication requires submission. Review remains necessary because arbitrary
+free text cannot be guaranteed anonymous. Automatic community-result downloads
+remain disabled.
 
 The upstream tests under `tests/` are retained as reference and adapted to portable
 source paths. `test_scan.py` and `test_reshade_ini.py` run offline; the large

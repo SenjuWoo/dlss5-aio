@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import shutil
 import struct
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -212,34 +213,38 @@ def identify(picked: list[Path]) -> tuple[str, dict[str, Path]]:
 
 def store(key: str, files: dict[str, Path]) -> Path:
     """Copy the picked files into the tool's own folder, replacing an older set."""
-    d = store_dir(key)
-    # Copied beside it first: files picked from inside the store itself
-    # would otherwise be deleted before they were read (gate 2.0.6).
-    new = d.with_name(d.name + ".new")
-    shutil.rmtree(new, ignore_errors=True)
-    new.mkdir(parents=True, exist_ok=True)
-    for dst, src in files.items():
-        shutil.copyfile(src, new / dst)
-    # The old set is renamed aside, not deleted, until the new one is in
-    # place: a file held open would otherwise leave neither (gate 2.0.6).
-    old = d.with_name(d.name + ".old")
-    shutil.rmtree(old, ignore_errors=True)
-    if d.is_dir():
-        d.rename(old)
-    try:
-        new.rename(d)
-    except OSError:
-        if old.is_dir() and not d.exists():
-            old.rename(d)
-        raise
-    shutil.rmtree(old, ignore_errors=True)
-    try:
+    if key not in RECIPES or set(files) != set(dests(key)):
+        raise OwnFgError("The frame generation files do not match a known complete recipe.")
+    from . import net
+    from .installer import _atomic_copy
+    with prefs.mutation_lock():
+        d = net.inside(prefs.FILE.parent, str(store_dir(key).absolute()), absolute_ok=True)
+        d.parent.mkdir(parents=True, exist_ok=True)
+        new = Path(tempfile.mkdtemp(prefix=key + ".new-", dir=d.parent))
+        old = None
+        try:
+            # Unique staging plus the profile lock prevents competing imports from deleting one another.
+            for dst, src in files.items():
+                _atomic_copy(Path(src), new / dst)
+            if d.exists():
+                old = Path(tempfile.mkdtemp(prefix=key + ".old-", dir=d.parent))
+                old.rmdir()
+                d.rename(old)
+            try:
+                new.rename(d)
+            except OSError:
+                if old is not None and old.is_dir() and not d.exists():
+                    old.rename(d)
+                raise
+            if old is not None:
+                shutil.rmtree(old)
+        finally:
+            if new.is_dir():
+                shutil.rmtree(new)
         have = prefs.get(FORGOTTEN) or []
-        if key in have:
+        if isinstance(have, list) and key in have:
             prefs.set_(FORGOTTEN, [k for k in have if k != key])
-    except Exception:
-        pass
-    return d
+        return d
 
 
 FORGOTTEN = "own_fg_forgotten"
@@ -259,13 +264,17 @@ def forgotten(key: str) -> bool:
 
 
 def forget(key: str) -> None:
-    shutil.rmtree(store_dir(key), ignore_errors=True)
-    try:
-        have = [k for k in (prefs.get(FORGOTTEN) or []) if isinstance(k, str)]
+    if key not in RECIPES:
+        raise OwnFgError("This frame generation recipe is not known.")
+    from . import net
+    with prefs.mutation_lock():
+        folder = net.inside(prefs.FILE.parent, str(store_dir(key).absolute()), absolute_ok=True)
+        if folder.exists():
+            shutil.rmtree(folder)
+        previous = prefs.get(FORGOTTEN)
+        have = [k for k in (previous if isinstance(previous, list) else []) if isinstance(k, str)]
         if key not in have:
             prefs.set_(FORGOTTEN, have + [key])
-    except Exception:
-        pass
 
 
 def recorded(man: dict | None) -> tuple[str, list[str]]:
@@ -332,25 +341,44 @@ def remove_leftovers(root: Path, man: dict | None, keep: str, log=None) -> list[
     of the person's own that was under that name goes back. Returns the
     relative names removed (the caller drops them from `preinstalled`)."""
     log = log or (lambda *_: None)
-    from .installer import BACKUP_SUFFIX
+    from . import net
+    from .installer import BACKUP_SUFFIX, _atomic_copy, _displace, _record_hash
     _, names = recorded(man)
     want = {n.lower() for n in dests(keep)}
     gone: list[str] = []
     for n in names:
         if n.lower() in want:
             continue
-        p = root / n
+        p = net.inside(root, n)
         bak = p.with_name(p.name + BACKUP_SUFFIX)
-        try:
-            if p.is_file():
-                p.unlink()
-                gone.append(n)
-            if bak.is_file():
-                bak.replace(p)
-                gone.append(bak.name)
-                log(f"      put your own {n} back")
-        except OSError:
-            log(f"      WARNING: could not remove {n}")
+        net.inside(root, str(bak.absolute()), absolute_ok=True)
+        backup_name = n + BACKUP_SUFFIX
+        original = _record_hash(man or {}, backup_name)
+        if original and not bak.is_file() and p.is_file() and net.sha256(p) == original:
+            # A prior run restored the original but stopped before the new manifest was saved.
+            gone.extend((n, backup_name))
+            continue
+        if original and (not bak.is_file() or net.sha256(bak) != original):
+            raise OSError(f"The original backup of {n} is missing or changed; it was preserved.")
+        written = _record_hash(man or {}, n)
+        if p.is_file() and not written and not bak.is_file():
+            log(f"      kept {n}: its ownership is unproven")
+            continue
+        if p.is_file() and (not written or net.sha256(p) != written):
+            kept = _displace(p)
+            log(f"      kept changed {n} as {kept.name}")
+        if bak.is_file():
+            _atomic_copy(bak, p)
+            gone.append(n)
+            if original:
+                bak.unlink()
+                gone.append(backup_name)
+            else:
+                log(f"      kept legacy {bak.name}: its original bytes cannot be verified")
+            log(f"      put your own {n} back")
+        elif p.is_file():
+            p.unlink()
+            gone.append(n)
     if gone:
         log(f"      frame generation files off: removed {', '.join(gone)}")
     return gone

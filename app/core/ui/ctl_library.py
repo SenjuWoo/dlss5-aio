@@ -766,6 +766,8 @@ class LibraryControl:
                               "Backups and your own files are kept." + left,
                               "update", "cancel"):
             return
+        if self.busy:
+            return
         self.busy = True
 
         def work():

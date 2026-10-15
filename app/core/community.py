@@ -1,26 +1,9 @@
-"""What happened to everybody else in this game, before you install.
+"""Prepare optional shared-result reports and read local compatibility records.
 
-The tool decides a route from the executable alone: what it imports, what
-ships beside it, how the engine behaves. That is a good guess about one
-machine. It is not what a thousand machines actually found - and the answer
-to "will this work in Red Dead Redemption 2" has been sitting in the issue
-tracker the whole time, in somebody's head, instead of in the tool.
-
-How it works, with no server anywhere:
-
-* People press "it worked" / "it did not" after playing. That opens a
-  GitHub issue - the same way the bug report does - carrying one machine
-  readable block and nothing that identifies them: the game's name and
-  executable, the route, the build, the graphics API, the card's model and
-  architecture, the driver, this tool's version, the outcome, and - where
-  the session was measured - the work area it ran at, the milliseconds a frame
-  spent on what grows with that area, and the frame rate. No paths, no user name,
-  no machine id, and nothing at all leaves without the button being pressed.
-* A workflow in the repository adds those up into `docs/compatibility.json`.
-* Every tool downloads that file and reads it before an install.
-
-So the write side is a browser window the person can read and cancel, and
-the read side is one static file. Nothing here phones home.
+This fork has no aggregation feed enabled. Opening a report sends its prefilled
+text to GitHub in the browser URL; submitting there publishes the issue. Common
+local identity, paths and credential fields are redacted before serialization.
+People must still review their freeform description before submitting.
 """
 from __future__ import annotations
 
@@ -670,10 +653,12 @@ def next_route(data: dict, game, tried: str, offer: list[str] | None = None,
 
 
 def issue_url(rec: dict, note: str = "") -> str:
-    """A pre-filled issue that carries the record. Nothing is posted by the
-    tool itself - the person reads it in their browser and decides."""
+    """Opening sends prefilled text to GitHub; submitting publishes the issue."""
     from urllib.parse import quote
     from . import update
+    from .reportprivacy import public_text
+    rec = {key: public_text(value) if isinstance(value, str) else value for key, value in rec.items()}
+    note = public_text(note)
     verb = "worked" if rec.get("result") == "worked" else "did not work"
     title = f"result: {rec.get('game') or rec.get('exe') or '?'} - {verb}"
     body = (f"**{rec.get('game') or rec.get('exe')}** {verb} on the "

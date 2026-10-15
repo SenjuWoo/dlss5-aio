@@ -23,7 +23,7 @@ spec.loader.exec_module(entry)
 class AioShellTests(unittest.TestCase):
     def test_isolated_profile_and_game_only_rail(self):
         self.assertEqual(update.REPO, "SenjuWoo/dlss5-aio")
-        self.assertEqual(update.VERSION, "2.0.0")
+        self.assertEqual(update.VERSION, "2.0.1")
         self.assertEqual(net.CACHE.parent.name, "dlss5-aio")
         self.assertEqual(prefs.FILE.parent.name, "dlss5-aio")
         self.assertEqual(log.FILE.name, "aio.log")
@@ -61,7 +61,7 @@ class AioShellTests(unittest.TestCase):
             self.assertIn("resolved choice", log.FILE.read_text())
 
     def test_source_entrypoint_subprocess(self):
-        for flag, expected in (("--version", "2.0.0"), ("--self-test", '"status": "ok"')):
+        for flag, expected in (("--version", "2.0.1"), ("--self-test", '"status": "ok"')):
             with self.subTest(flag=flag):
                 result = subprocess.run([sys.executable, str(APP / "dlss5_aio.py"), flag],
                                         capture_output=True, text=True, timeout=30)

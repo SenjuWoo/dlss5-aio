@@ -198,13 +198,12 @@ class App(LibraryControl, GameControl, WatchControl, DlssControl):
                                     "ctrl+h      games")
 
     def report_bug(self, kind: str = "bug") -> None:
-        """A pre-filled issue with the machine details in it. Nothing is sent:
-        the browser shows the text and the person decides.
+        """Opening the prefilled URL sends details to GitHub; submission publishes it.
 
         Works with no game picked - the 1.9 window read the picked game's
         install folder outside any guard and raised from the help menu."""
         from urllib.parse import quote
-        from .. import diagnose, installer, reportui
+        from .. import diagnose, installer, reportprivacy, reportui
         try:
             name, sm = gpu.detect()
         except Exception:
@@ -213,12 +212,14 @@ class App(LibraryControl, GameControl, WatchControl, DlssControl):
         g = self.game if self.shell.page is not None and self.shell.page.name == "game" else None
         title = {"crash": "crash: ", "notwork": "not working: "}.get(kind, "bug: ") + (g.name if g else "")
         install_dir = g.install_dir if g is not None else None
-        asked = True
+        title = reportprivacy.public_text(title, (install_dir,))
         try:
             answers = reportui.ask(self.root, getattr(g, "name", "") or "")
-        except Exception:
-            answers, asked = None, False
-        if asked and answers is None:
+        except Exception as error:
+            log.exception("opening the report review form", error)
+            self.shell.error("report a bug", "The report form could not open. No browser was opened.")
+            return
+        if answers is None:
             return
         # what is installed first: the dropdown may show a route the person
         # was only looking at, and the report's helper log follows the route
@@ -365,6 +366,7 @@ class App(LibraryControl, GameControl, WatchControl, DlssControl):
         if self.update_ready is not None and not Path(self.update_ready).is_file():
             self.update_ready = None
         if self.update_ready is not None:
+            self.busy = True
             self.shell.banner("update", "restarting into the new build...")
             self.root.update()
             self._restart_into(self.update_ready)
@@ -377,6 +379,8 @@ class App(LibraryControl, GameControl, WatchControl, DlssControl):
                               "The current build is kept beside it as .old.exe for the new one's first run, so you "
                               "can go back; it is removed when the new version starts a second time.",
                               "update", "not now"):
+            return
+        if self.busy:
             return
         self.busy = True
         self.shell.banner("update", "downloading the update...")

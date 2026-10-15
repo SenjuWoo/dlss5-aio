@@ -37,11 +37,15 @@ class RuntimeCatalogTests(unittest.TestCase):
         self.cache.start()
         self.logging = patch.object(catalog.log, "write")
         self.logging.start()
+        # Archive-shape fixtures stand in for a verified publisher; crypto cases override this.
+        self.signatures = patch.object(catalog, "_signature", return_value={"status": "Valid", "signer": "NVIDIA Corporation", "product": "NVIDIA Deep Learning SuperSampling"})
+        self.signatures.start()
         self.old_catalog = catalog._CATALOG
         catalog._CATALOG = None
 
     def tearDown(self):
         catalog._CATALOG = self.old_catalog
+        self.signatures.stop()
         self.logging.stop()
         self.cache.stop()
         self.tmp.cleanup()
@@ -86,6 +90,47 @@ class RuntimeCatalogTests(unittest.TestCase):
         path = self.root / "source.dll"
         path.write_bytes(dll())
         self.assertEqual(self.resolve(path), path)
+
+    def test_unpinned_mirror_requires_valid_nvidia_signature(self):
+        for signature in ({"status": "NotSigned", "signer": ""},
+                          {"status": "Valid", "signer": "Another Publisher"},
+                          {"status": "UnknownError", "signer": "NVIDIA Corporation"}, []):
+            with self.subTest(signature=signature):
+                path = self.archive([("nvngx_dlss.dll", dll())])
+                with patch.object(catalog, "_signature", return_value=signature):
+                    with self.assertRaisesRegex(ValueError, "publisher signature"):
+                        self.resolve(path, self.build(path, raw=False))
+                self.assertFalse(path.exists())
+        path = self.archive([("nvngx_dlss.dll", dll())])
+        with patch.object(catalog, "_signature", return_value={"status": "Valid", "signer": "NVIDIA Corporation", "product": "NVIDIA Deep Learning SuperSampling"}) as check:
+            self.assertEqual(self.resolve(path, self.build(path, raw=False)).read_bytes(), dll())
+            check.assert_called_once()
+
+    def test_signed_product_must_match_each_runtime_family(self):
+        products = {"dlss": "NVIDIA Deep Learning SuperSampling",
+                    "dlssg": "NVIDIA DLSS-G MFGLW",
+                    "dlssd": "NVIDIA DLSS Ray Reconstruction"}
+        for family, expected in products.items():
+            for product in (*products.values(), "", "Future unrelated NVIDIA product"):
+                with self.subTest(family=family, product=product), patch.object(catalog, "_signature", return_value={"status": "Valid", "signer": "NVIDIA Corporation", "product": product}):
+                    if product == expected:
+                        catalog._verify_publisher(self.root / "unused.dll", family)
+                    else:
+                        with self.assertRaisesRegex(ValueError, "product identity"):
+                            catalog._verify_publisher(self.root / "unused.dll", family)
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows Authenticode boundary")
+    def test_windows_signature_reader_treats_filename_as_data(self):
+        path = self.root / "runtime ' $ & ( ).dll"
+        path.write_bytes(dll())
+        # Exercise the actual Windows reader, bypassing the fixture's signer substitute.
+        self.signatures.stop()
+        try:
+            result = catalog._signature(path)
+            self.assertNotEqual(result["status"], "Valid")
+            self.assertEqual(result["signer"], "")
+        finally:
+            self.signatures.start()
 
     def test_windows_file_version_must_match_release_label(self):
         path = self.root / "source.dll"

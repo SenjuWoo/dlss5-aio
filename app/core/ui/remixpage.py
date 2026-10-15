@@ -292,6 +292,8 @@ class RemixPage(Page):
                               f"DLSS 5 install in the same folder are left alone.",
                               "remove", "keep", danger=True):
             return
+        if a.busy or self.busy_mod is not None:
+            return
         self.busy_mod = mod
         self._dropped = mod.url
         self.state[mod.url] = ("working...", T.AMBER)

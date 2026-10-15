@@ -43,10 +43,12 @@ release page and never bundled here, like every other component.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
 import subprocess
+import threading
 import zipfile
 from pathlib import Path
 
@@ -395,10 +397,72 @@ def _tar_exe() -> Path:
     return Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "tar.exe"
 
 
+def _unpacker_output(command: list[str], flags: int, timeout: int = 120):
+    """Bound output in memory and stop only our own extractor if it stalls."""
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                               creationflags=flags)
+    expired = threading.Event()
+    def stop():
+        expired.set()
+        try:
+            process.kill()
+        except OSError:
+            pass                            # the process may have just exited
+    timer = threading.Timer(timeout, stop)
+    timer.daemon = True
+    try:
+        timer.start()
+        output = net.read_bounded(process.stdout, net.MAX_TEXT)
+        result = process.wait(timeout=timeout)
+        if expired.is_set():
+            raise subprocess.TimeoutExpired(command, timeout)
+        return subprocess.CompletedProcess(command, result, output.decode("utf8", "replace"), "")
+    finally:
+        timer.cancel()
+        if process.poll() is None:
+            process.kill()
+        process.wait()
+        process.stdout.close()
+
+
+def _preflight_7z(exe: Path, archive: Path, dest: Path, flags: int) -> None:
+    """List paths, links and sizes before an external unpacker can write them."""
+    result = _unpacker_output([str(exe), "l", "-slt", "-ba", "-sccUTF-8", str(archive)], flags, 60)
+    if result.returncode:
+        raise net.WrongContent("Could not safely list the 7z archive before extraction.")
+    text = result.stdout.replace("\r\n", "\n")
+    entries, seen, size = 0, set(), 0
+    for block in text.strip().split("\n\n"):
+        fields = {}
+        for line in block.splitlines():
+            if " = " not in line:
+                raise net.WrongContent("The archive listing contains an ambiguous filename or field.")
+            key, value = line.split(" = ", 1)
+            if key in fields:
+                raise net.WrongContent("The archive listing repeats a field.")
+            fields[key] = value
+        name = fields.get("Path", "")
+        try:
+            target = net.inside(dest, name)
+            count = int(fields.get("Size", ""))
+        except (ValueError, net.OutsideError):
+            raise net.WrongContent("The archive listing contains an unsafe path or size.") from None
+        normalized = name.replace("\\", "/")
+        entries += 1
+        size += count
+        if (not name or ".." in normalized.split("/") or str(target).casefold() in seen
+                or count < 0 or fields.get("Encrypted") != "-"
+                or fields.get("Symbolic Link") or fields.get("Hard Link")
+                or any(part.startswith("l") for part in fields.get("Attributes", "").split())
+                or entries > net.MAX_ZIP_MEMBERS or size > net.MAX_DOWNLOAD):
+            raise net.WrongContent("The 7z archive contains a link, duplicate, unsafe path or oversized payload.")
+        seen.add(str(target).casefold())
+
+
 def _seven_zr_extract(archive: Path, dest: Path, flags: int) -> bool:
     """Unpack with 7-Zip's one-file 7zr.exe, fetched for this. True if it did.
 
-    The last resort after an installed 7-Zip and tar.exe. "Install 7-Zip"
+    The fallback after an installed 7-Zip. "Install 7-Zip"
     was the answer to #93 and #87 alike - a second program to find and set
     up, for a tool whose point is that it does that part itself.
     """
@@ -411,12 +475,12 @@ def _seven_zr_extract(archive: Path, dest: Path, flags: int) -> bool:
                 # keep it for next time either.
                 exe.unlink(missing_ok=True)
                 continue
-            r = subprocess.run([str(exe), "x", str(archive), f"-o{dest}", "-y"],
-                               capture_output=True, text=True, creationflags=flags)
+            _preflight_7z(exe, archive, dest, flags)
+            r = _unpacker_output([str(exe), "x", str(archive), f"-o{dest}", "-y"], flags)
             _raise_if_full(r, dest)
             return r.returncode == 0
         except Exception as e:
-            if net.is_disk_full(e):
+            if net.is_disk_full(e) or isinstance(e, net.WrongContent):
                 raise
             continue
     return False
@@ -460,14 +524,14 @@ def _seven_zip() -> Path | None:
 
 
 def extract_7z(archive: Path, dest: Path) -> None:
-    """Unpack a .7z into dest: 7-Zip if it is here, else Windows' tar.exe."""
+    """Unpack only after a bounded, verified listing from 7-Zip or pinned 7zr."""
     dest.mkdir(parents=True, exist_ok=True)
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
     sz = _seven_zip()
     if sz is not None:
-        r = subprocess.run([str(sz), "x", str(archive), f"-o{dest}", "-y"],
-                           capture_output=True, text=True, creationflags=flags)
+        _preflight_7z(sz, archive, dest, flags)
+        r = _unpacker_output([str(sz), "x", str(archive), f"-o{dest}", "-y"], flags)
         _raise_if_full(r, dest)
         if r.returncode == 0:
             return
@@ -475,21 +539,22 @@ def extract_7z(archive: Path, dest: Path) -> None:
     else:
         seven_err = ""
 
+    if _seven_zr_extract(archive, dest, flags):
+        return
+    if sz is None:
+        raise RuntimeError("The archive cannot be listed safely: no installed 7-Zip and the pinned "
+                           "unpacker could not be fetched. Install 7-Zip (7-zip.org) and try again.")
+
     tar = _tar_exe()
     if not tar.is_file():
-        if _seven_zr_extract(archive, dest, flags):
-            return
         raise RuntimeError(
             f"{archive.name} is a .7z archive and there is nothing here to "
             f"open it: no 7-Zip, and this Windows has no tar.exe either "
             f"(Windows 10 1803 and later ship one at {tar}). Install 7-Zip "
             f"and run the install again."
             + (f"\n\n7-Zip said: {seven_err}" if seven_err else ""))
-    r = subprocess.run([str(tar), "-xf", str(archive), "-C", str(dest)],
-                       capture_output=True, text=True, creationflags=flags)
+    r = _unpacker_output([str(tar), "-xf", str(archive), "-C", str(dest)], flags)
     _raise_if_full(r, dest)
-    if r.returncode != 0 and _seven_zr_extract(archive, dest, flags):
-        return
     if r.returncode != 0:
         err = (r.stderr or r.stdout).strip()[-300:]
         hint = ""
@@ -507,22 +572,64 @@ def extract_7z(archive: Path, dest: Path) -> None:
 
 def _unpacked(archive: Path) -> Path:
     """The archive's files in a folder under the cache, unpacked once."""
-    out = net.cache_dir() / "unpacked" / archive.stem
-    if out.is_dir() and any(out.iterdir()):
-        return _top(out)
+    with net.cache_locked():
+        return _unpacked_locked(archive)
+
+
+def _unpacked_locked(archive: Path) -> Path:
+    digest = net.sha256(archive)
+    out = net.cache_dir() / "unpacked" / digest
+    receipt = out.with_name(out.name + ".json")
+    if out.is_dir() and not out.is_symlink():
+        try:
+            expected = json.loads(receipt.read_text(encoding="utf8"))
+            if expected and expected == _unpacked_identity(out):
+                return _top(out)
+        except (OSError, ValueError):
+            pass
     # Into a side folder first: an extraction that dies half-way must not
     # be taken for a complete one on the next install.
     tmp = out.with_name(out.name + ".part")
+    if out.is_symlink() or tmp.is_symlink():
+        raise RuntimeError("An unpacked cache folder is a symbolic link; refusing it.")
     shutil.rmtree(tmp, ignore_errors=True)
     shutil.rmtree(out, ignore_errors=True)
-    if archive.suffix.lower() == ".7z":
-        extract_7z(archive, tmp)
-    else:
-        tmp.mkdir(parents=True, exist_ok=True)
-        with zipfile.ZipFile(archive) as arc:
-            arc.extractall(tmp)
-    tmp.rename(out)
+    receipt.unlink(missing_ok=True)
+    tmp.mkdir(parents=True, exist_ok=True)
+    try:
+        if archive.suffix.lower() == ".7z":
+            extract_7z(archive, tmp)
+        else:
+            with zipfile.ZipFile(archive) as arc:
+                for info in net.zip_entries(arc):
+                    target = net.inside(tmp, info.filename)
+                    if info.is_dir():
+                        target.mkdir(parents=True, exist_ok=True)
+                    else:
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        net._copy_member(arc, info, target)
+        identity = _unpacked_identity(tmp)
+        tmp.rename(out)
+        receipt.write_text(json.dumps(identity, sort_keys=True), encoding="utf8")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
     return _top(out)
+
+
+def _unpacked_identity(root: Path) -> dict:
+    """Do not copy modified cache files, links or reparse points into a game."""
+    identities = {}
+    for path in root.rglob("*"):
+        metadata = path.lstat()
+        if (path.is_symlink() or getattr(metadata, "st_file_attributes", 0) & 0x400
+                or (path.is_file() and metadata.st_nlink > 1)):
+            raise ValueError("The unpacked archive contains a link or reparse point.")
+        net.inside(root, str(path.relative_to(root)))
+        if path.is_file():
+            identities[path.relative_to(root).as_posix()] = [metadata.st_size, net.sha256(path)]
+    if len(identities) > net.MAX_ZIP_MEMBERS or sum(row[0] for row in identities.values()) > net.MAX_DOWNLOAD:
+        raise ValueError("The unpacked archive exceeds its extraction limit.")
+    return identities
 
 
 def _top(root: Path) -> Path:
@@ -598,7 +705,7 @@ def suggest_proxy(exe_dir: Path, avoid=()) -> str:
 
 
 def install(exe_dir: Path, proxy: str = DEFAULT_PROXY, dl=None, log=None,
-            backup=None, release: tuple[str, str] | None = None) -> list[str]:
+            backup=None, release: tuple[str, str] | None = None, writer=None) -> list[str]:
     """Extract OptiScaler into the game folder under the chosen proxy name.
 
     `backup(path)` is called before anything existing is overwritten, so the
@@ -614,9 +721,12 @@ def install(exe_dir: Path, proxy: str = DEFAULT_PROXY, dl=None, log=None,
         raise ValueError(f"{proxy} is not a proxy name OptiScaler supports.")
 
     written: list[str] = []
+    from . import installer
+    report = installer.Report()
 
     def _keep(target: Path) -> None:
         """Preserve an existing file, through the caller's manifest if given."""
+        net.inside(exe_dir, str(target.absolute()), absolute_ok=True)
         if not target.is_file():
             return
         if backup is not None:
@@ -624,11 +734,10 @@ def install(exe_dir: Path, proxy: str = DEFAULT_PROXY, dl=None, log=None,
             return
         bak = target.with_name(target.name + BACKUP_SUFFIX)
         if not bak.exists():
-            try:
-                shutil.copy2(target, bak)
-                written.append(str(bak.relative_to(exe_dir)).replace("\\", "/"))
-            except OSError:
-                pass
+            installer._atomic_copy(target, bak)
+            written.append(str(bak.relative_to(exe_dir)).replace("\\", "/"))
+        else:
+            installer._displace(target)
 
     tag, url = release if release else resolve()
     log(f"      OptiScaler DLSS-NR {tag}")
@@ -685,14 +794,16 @@ def install(exe_dir: Path, proxy: str = DEFAULT_PROXY, dl=None, log=None,
         rel = proxy if member == MAIN_DLL else member
         target = exe_dir / rel
         target.parent.mkdir(parents=True, exist_ok=True)
-        _keep(target)          # someone may have a tuned OptiScaler.ini
-        shutil.copyfile(src, target)
+        if writer is None:
+            installer._copy(src, target, report, exe_dir)
+        else:
+            writer(src, target)
         written.append(rel)
 
     log(f"      OptiScaler.dll installed as {proxy}")
     log(f"      {FORWARDER} placed - the model refuses calls from a module "
         f"whose path does not contain 'nvngx.dll'")
-    return written
+    return list(dict.fromkeys(report.written + written))
 
 
 # The fork's [DlssNr] section (Config.cpp reads it case-insensitively). Only
@@ -845,6 +956,7 @@ def enable_nr(exe_dir: Path, log=None, settings: dict | None = None) -> None:
             f"tick it under DLSS Neural Rendering")
     except OSError:
         log("      could not write OptiScaler.ini")
+        raise
 
 
 # Frame generation, on any card. OptiScaler's zip ships AMD's FSR 3.1 frame
@@ -881,6 +993,7 @@ def set_overlay_key(exe_dir: Path, vk: int, log=None) -> None:
         log(f"      OptiScaler.ini: [Menu] ShortcutKey=0x{int(vk):02X}")
     except OSError:
         log("      could not write the overlay key into OptiScaler.ini")
+        raise
 
 
 # wilsjo2's RTX 40 MFG package carries the unlock, and its OptiScaler.ini
@@ -950,6 +1063,7 @@ def set_dx11_bridged_upscaler(exe_dir: Path, log=None) -> None:
             "model does not run on D3D11 itself; FSR 2.2 on D3D12 carries it)")
     except OSError:
         log("      could not write OptiScaler.ini")
+        raise
 
 
 # What OptiScaler_dlssnr.ini (the fork's shipped ini, in _research/) says
@@ -1029,6 +1143,7 @@ def enable_inputs(exe_dir: Path, upscaler: str, api: str, log=None) -> None:
             f"go into OptiScaler, which runs DLSS in their place")
     except OSError:
         log("      could not write OptiScaler.ini")
+        raise
 
 
 def describe_nr(settings: dict | None) -> list[str]:

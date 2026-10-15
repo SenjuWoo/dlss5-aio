@@ -34,6 +34,7 @@ this can honestly do, and it is what it does.
 """
 from __future__ import annotations
 
+import math
 import re
 import time
 from dataclasses import dataclass, field
@@ -125,7 +126,8 @@ def _num(s: str) -> float | None:
     if s.count(".") > 1:
         return None
     try:
-        return float(s)
+        number = float(s)
+        return number if math.isfinite(number) else None
     except ValueError:
         return None
 
@@ -244,7 +246,7 @@ def _key(install_dir) -> str:
 
 def history(install_dir) -> list[dict]:
     all_ = prefs.get(HISTORY_KEY) or {}
-    rows = all_.get(_key(install_dir))
+    rows = all_.get(_key(install_dir)) if isinstance(all_, dict) else None
     return [r for r in (rows if isinstance(rows, list) else [])
             if isinstance(r, dict)]
 
@@ -257,34 +259,40 @@ def remember(install_dir, m: Measured) -> None:
     own cost. A session on one used to overwrite the other's point at the
     same work area, and the two-point solve quietly lost a leg.
     """
-    all_ = dict(prefs.get(HISTORY_KEY) or {})
-    rows = [r for r in (all_.get(_key(install_dir)) or [])
-            if isinstance(r, dict)
-            and not (r.get("resolution") == m.resolution
-                     and (r.get("route") or m.route) == m.route)]
-    rows.append({"resolution": m.resolution, "fps": m.fps,
-                 "model_ms": m.model_ms, "route": m.route,
-                 "at": int(time.time())})
-    all_[_key(install_dir)] = rows[-MAX_SAMPLES:]
-    if len(all_) > MAX_GAMES:
-        def newest(item):
-            # item[1] is whatever is in the file under that game's key.
-            # Same file, same junk: settings.json is read back off a disk,
-            # and a raise here happens inside the diagnosis.
-            seen = [int(r["at"])
-                    for r in (item[1] if isinstance(item[1], list) else [])
-                    if isinstance(r, dict)
-                    and isinstance(r.get("at"), (int, float))
-                    and not isinstance(r.get("at"), bool)]
-            return max(seen, default=0)
-        all_ = dict(sorted(all_.items(), key=newest)[-MAX_GAMES:])
-    prefs.set_(HISTORY_KEY, all_)
+    with prefs.mutation_lock():
+        current = prefs.get(HISTORY_KEY)
+        all_ = dict(current) if isinstance(current, dict) else {}
+        current_rows = all_.get(_key(install_dir))
+        rows = [r for r in (current_rows if isinstance(current_rows, list) else [])
+                if isinstance(r, dict)
+                and not (r.get("resolution") == m.resolution
+                         and (r.get("route") or m.route) == m.route)]
+        rows.append({"resolution": m.resolution, "fps": m.fps,
+                     "model_ms": m.model_ms, "route": m.route,
+                     "at": int(time.time())})
+        all_[_key(install_dir)] = rows[-MAX_SAMPLES:]
+        if len(all_) > MAX_GAMES:
+            def newest(item):
+                # item[1] is whatever is in the file under that game's key.
+                # Same file, same junk: settings.json is read back off a disk,
+                # and a raise here happens inside the diagnosis.
+                seen = [int(r["at"])
+                        for r in (item[1] if isinstance(item[1], list) else [])
+                        if isinstance(r, dict)
+                        and isinstance(r.get("at"), (int, float))
+                        and not isinstance(r.get("at"), bool)
+                        and math.isfinite(r["at"])]
+                return max(seen, default=0)
+            all_ = dict(sorted(all_.items(), key=newest)[-MAX_GAMES:])
+        prefs.set_(HISTORY_KEY, all_)
 
 
 def forget(install_dir) -> None:
-    all_ = dict(prefs.get(HISTORY_KEY) or {})
-    if all_.pop(_key(install_dir), None) is not None:
-        prefs.set_(HISTORY_KEY, all_)
+    with prefs.mutation_lock():
+        current = prefs.get(HISTORY_KEY)
+        all_ = dict(current) if isinstance(current, dict) else {}
+        if all_.pop(_key(install_dir), None) is not None:
+            prefs.set_(HISTORY_KEY, all_)
 
 
 # ------------------------------------------------------------ the arithmetic
@@ -351,9 +359,9 @@ def _points(rows: list[dict], route: str = "") -> list[tuple[int, float]]:
             continue
         try:
             res, fps = int(r["resolution"]), float(r["fps"])
-        except (KeyError, TypeError, ValueError):
+        except (KeyError, TypeError, ValueError, OverflowError):
             continue
-        if res and fps > 0:
+        if MIN_RES <= res <= MAX_RES and math.isfinite(fps) and fps > 0:
             out[res] = 1000.0 / fps
     return sorted(out.items())
 

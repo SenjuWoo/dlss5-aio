@@ -19,7 +19,9 @@ the same names the games themselves use, so they need no explanation.
 from __future__ import annotations
 
 import json
+import os
 import re
+import tempfile
 from dataclasses import fields, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -97,17 +99,35 @@ def _to_dict(opt: Options) -> dict:
 
 
 def save(name: str, opt: Options) -> Path:
-    if is_builtin(name):
-        raise ValueError(f"'{name}' is a built-in preset and cannot be replaced.")
-    from .update import VERSION
-    data = {"name": name.strip(),
-            "saved": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            "app_version": VERSION}
-    data.update(_to_dict(opt))
-    p = _path(name)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf8")
-    return p
+    with prefs.mutation_lock():
+        if is_builtin(name):
+            raise ValueError(f"'{name}' is a built-in preset and cannot be replaced.")
+        from .update import VERSION
+        data = {"name": name.strip(),
+                "saved": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                "app_version": VERSION}
+        data.update(_to_dict(opt))
+        p = _path(name)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        if p.exists():
+            # Two display names can sanitize to one filename; preserve the first profile.
+            try:
+                previous = json.loads(p.read_text(encoding="utf8"))
+            except (OSError, ValueError):
+                raise ValueError("The existing profile cannot be read; choose another name to keep it.") from None
+            if not isinstance(previous, dict) or str(previous.get("name", "")).casefold() != name.strip().casefold():
+                raise ValueError("This name conflicts with an existing profile; choose another name.")
+        staged = None
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf8", suffix=".tmp", dir=p.parent,
+                                             delete=False) as f:
+                staged = Path(f.name)
+                f.write(json.dumps(data, ensure_ascii=False, indent=2))
+            os.replace(staged, p)
+        finally:
+            if staged is not None:
+                staged.unlink(missing_ok=True)
+        return p
 
 
 def _from_dict(data: dict) -> Options:
@@ -154,16 +174,25 @@ def load(name: str) -> Options:
         raise ValueError(f"Profile '{name}' is not valid JSON: {e}")
     if not isinstance(data, dict):
         raise ValueError(f"Profile '{name}' does not hold settings.")
+    if str(data.get("name") or name).casefold() != name.strip().casefold():
+        raise ValueError("This profile name conflicts with another saved profile.")
     return _from_dict(data)
 
 
 def delete(name: str) -> None:
-    if is_builtin(name):
-        raise ValueError(f"'{name}' is a built-in preset and cannot be deleted.")
-    try:
-        _path(name).unlink()
-    except FileNotFoundError:
-        pass
+    with prefs.mutation_lock():
+        if is_builtin(name):
+            raise ValueError(f"'{name}' is a built-in preset and cannot be deleted.")
+        path = _path(name)
+        if not path.exists():
+            return
+        try:
+            data = json.loads(path.read_text(encoding="utf8"))
+        except (OSError, ValueError) as error:
+            raise ValueError("The existing profile cannot be read; it was preserved.") from error
+        if not isinstance(data, dict) or str(data.get("name") or name).casefold() != name.strip().casefold():
+            raise ValueError("This profile name conflicts with another saved profile.")
+        path.unlink()
 
 
 def apply(base: Options, prof: Options) -> Options:

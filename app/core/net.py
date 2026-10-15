@@ -11,16 +11,32 @@ import json
 import os
 import shutil
 import ssl
+import stat
+import tempfile
+import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
-from pathlib import Path
+from contextlib import contextmanager
+from pathlib import Path, PurePosixPath
 
 from . import sources
 
 CACHE = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "dlss5-aio" / "cache"
+_CACHE_LOCK = threading.RLock()
+MAX_DOWNLOAD = 2 * 1024 * 1024 * 1024
+MAX_TEXT = 16 * 1024 * 1024
+MAX_ZIP_MEMBERS = 20000
+
+
+@contextmanager
+def cache_locked():
+    """Cache partial files are shared by different games and app processes."""
+    from . import gamelock
+    with _CACHE_LOCK, gamelock.locked(cache_dir()):
+        yield
 
 
 def cache_dir() -> Path:
@@ -36,7 +52,15 @@ def cache_size() -> int:
 
 def clear_cache() -> None:
     if CACHE.is_dir():
-        shutil.rmtree(CACHE, ignore_errors=True)
+        with cache_locked():
+            # Keep the lock inode: another process must lock this same file.
+            for path in CACHE.iterdir():
+                if path.name == ".dlss5-aio.lock":
+                    continue
+                if path.is_dir() and not path.is_symlink():
+                    shutil.rmtree(path)
+                else:
+                    path.unlink()
 
 
 # errno 28 is what Python says; ERROR_DISK_FULL (112) and
@@ -361,47 +385,88 @@ def _head(path: Path, n: int = 24) -> bytes:
         return b""
 
 
+def _https_url(url: str) -> None:
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+        raise ValueError("A download must use HTTPS without embedded credentials.")
+
+
+def read_bounded(stream, limit: int = MAX_TEXT) -> bytes:
+    """Small API/HTML responses must not consume arbitrary memory."""
+    data = stream.read(limit + 1)
+    if len(data) > limit:
+        raise WrongContent(f"The response exceeds the {limit}-byte limit.")
+    return data
+
+
 def download(url: str, name: str, progress=None, force: bool = False,
-             attempts: int = 4) -> Path:
+             attempts: int = 4, max_bytes: int = MAX_DOWNLOAD) -> Path:
+    """Fetch one origin-bound cache entry without concurrent partial-file writes."""
+    with cache_locked():
+        return _download(url, name, progress, force, attempts, max_bytes)
+
+
+def _download(url: str, name: str, progress, force: bool,
+              attempts: int, max_bytes: int) -> Path:
     """Download to the cache and return the path. progress(done, total).
 
     Retries on failure and resumes from a partial file with an HTTP Range
     request - dropping 150 MB and starting over because a connection blipped
     is miserable on a slow line.
     """
-    dest = cache_dir() / name
+    _https_url(url)
+    if not name or Path(name).name != name or "/" in name or "\\" in name or ":" in name:
+        raise ValueError("A download cache name must be a plain filename.")
+    dest = inside(cache_dir(), name)
+    source = inside(cache_dir(), dest.name + ".source.json")
+    try:
+        bound = json.loads(source.read_text(encoding="utf8"))
+        same_source = bound == {"url": url}
+    except (OSError, ValueError):
+        same_source = False
     if dest.is_file() and dest.stat().st_size > 0 and not force:
-        if _looks_right(dest, dest.suffix):
+        if same_source and dest.stat().st_size <= max_bytes and _looks_right(dest, dest.suffix):
             if progress:
                 progress(dest.stat().st_size, dest.stat().st_size)
             return dest
         # A bad file in the cache is fetched again, not served forever (#140).
-        try:
-            dest.unlink()
-        except OSError:
-            pass
-
-    tmp = dest.with_suffix(dest.suffix + ".part")
+    tmp = inside(cache_dir(), dest.name + ".part")
+    # Unbound partial bytes might belong to a different URL or an older asset.
+    if not same_source:
+        tmp.unlink(missing_ok=True)
     last: Exception | None = None
+    etag = None
 
     for attempt in range(attempts):
         have = tmp.stat().st_size if tmp.is_file() else 0
         headers = dict(sources.UA)
-        if have and attempt:                     # only resume on a retry
+        if have and attempt and etag:            # resume only the same entity
             headers["Range"] = f"bytes={have}-"
+            headers["If-Range"] = etag
         req = urllib.request.Request(url, headers=headers)
         try:
             with urllib.request.urlopen(req, timeout=120, context=ssl_context()) as r:
+                if callable(getattr(r, "geturl", None)):
+                    _https_url(r.geturl())
                 resuming = r.status == 206
+                if resuming:
+                    content_range = str(r.headers.get("Content-Range") or "")
+                    if "Range" not in headers or not content_range.startswith(f"bytes {have}-"):
+                        raise WrongContent(f"{name}: invalid partial download response.")
                 if not resuming:
                     have = 0
+                etag = r.headers.get("ETag")
                 total = int(r.headers.get("Content-Length") or 0) + have
+                if total > max_bytes or have > max_bytes:
+                    raise WrongContent(f"{name}: download exceeds the {max_bytes}-byte limit.")
                 done = have
                 with open(tmp, "ab" if resuming else "wb") as f:
                     while True:
                         chunk = r.read(256 * 1024)
                         if not chunk:
                             break
+                        if done + len(chunk) > max_bytes:
+                            raise WrongContent(f"{name}: download exceeds the {max_bytes}-byte limit.")
                         f.write(chunk)
                         done += len(chunk)
                         if progress:
@@ -422,8 +487,15 @@ def download(url: str, name: str, progress=None, force: bool = False,
                     f"in for the download. Nothing was written; try again "
                     f"or from another network.")
             tmp.replace(dest)
+            bound_tmp = inside(cache_dir(), source.name + ".part")
+            try:
+                bound_tmp.write_text(json.dumps({"url": url}), encoding="utf8")
+                bound_tmp.replace(source)
+            finally:
+                bound_tmp.unlink(missing_ok=True)
             return dest
         except WrongContent:
+            tmp.unlink(missing_ok=True)
             raise                                # the same page comes back
         except urllib.error.HTTPError as e:
             tmp.unlink(missing_ok=True)          # 4xx/5xx: resuming won't help
@@ -520,6 +592,13 @@ def inside(root: Path, rel: str, absolute_ok: bool = False) -> Path:
     """
     root = Path(root).resolve()
     p = Path(rel.replace("\\", "/"))
+    parts = p.parts[1:] if p.anchor else p.parts
+    for part in parts:
+        if part in (".", ".."):
+            continue
+        if (":" in part or part.endswith((".", " ")) or any(ord(c) < 32 for c in part)
+                or part.split(".", 1)[0].upper() in _WINDOWS_DEVICES):
+            raise OutsideError(f"{rel} contains an unsafe Windows filename - refused.")
     if (p.is_absolute() or p.drive or rel.startswith(("/", "\\"))) \
             and not absolute_ok:
         raise OutsideError(f"{rel} is an absolute path - refused.")
@@ -531,24 +610,70 @@ def inside(root: Path, rel: str, absolute_ok: bool = False) -> Path:
 
 def zip_members(zpath: Path) -> list[str]:
     with zipfile.ZipFile(zpath) as z:
-        return z.namelist()
+        return [info.filename for info in zip_entries(z)]
 
 
-def extract_one(zpath: Path, member_suffix: str, dest: Path) -> None:
-    """Extract the first member whose name ends with member_suffix."""
+_WINDOWS_DEVICES = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)),
+                    *(f"LPT{i}" for i in range(1, 10))}
+
+
+def zip_entries(archive: zipfile.ZipFile) -> list[zipfile.ZipInfo]:
+    """Preflight archive names and bounds before any member reaches the disk."""
+    infos = archive.infolist()
+    if len(infos) > MAX_ZIP_MEMBERS or sum(info.file_size for info in infos) > MAX_DOWNLOAD:
+        raise WrongContent("The archive exceeds its extraction limit.")
+    seen = set()
+    for info in infos:
+        name = info.filename.replace("\\", "/")
+        path = PurePosixPath(name)
+        key = str(path).casefold()
+        if (not path.parts or path.is_absolute() or ".." in path.parts or key in seen
+                or any(":" in part or any(ord(c) < 32 for c in part) or part.endswith((".", " "))
+                       or part.split(".", 1)[0].upper() in _WINDOWS_DEVICES for part in path.parts)
+                or stat.S_ISLNK(info.external_attr >> 16) or info.external_attr & 0x400 or info.flag_bits & 1
+                or info.file_size > MAX_DOWNLOAD
+                or info.file_size > max(1, info.compress_size) * 1000):
+            raise WrongContent(f"Unsafe or duplicate archive member: {info.filename}")
+        seen.add(key)
+    return infos
+
+
+def _copy_member(archive: zipfile.ZipFile, member: zipfile.ZipInfo, target: Path) -> None:
+    with archive.open(member) as source, target.open("wb") as dest:
+        shutil.copyfileobj(source, dest, 1 << 20)
+    if target.stat().st_size != member.file_size:
+        raise WrongContent(f"Truncated archive member: {member.filename}")
+
+
+def extract_one(zpath: Path, member_suffix: str, dest: Path, writer=None) -> None:
+    """Extract one unambiguous member, committing only after CRC/size checks."""
     with zipfile.ZipFile(zpath) as z:
-        hit = next((n for n in z.namelist()
-                    if not n.endswith("/") and n.lower().endswith(member_suffix.lower())), None)
-        if hit is None:
+        suffix = member_suffix.replace("\\", "/").lower()
+        matches = [info for info in zip_entries(z) if not info.is_dir()
+                   and (info.filename.replace("\\", "/").lower().endswith(suffix)
+                        if suffix.startswith(".") else
+                        info.filename.replace("\\", "/").lower() == suffix
+                        or info.filename.replace("\\", "/").lower().endswith("/" + suffix))]
+        if not matches:
             raise RuntimeError(f"{zpath.name} does not contain {member_suffix}.")
+        if len(matches) != 1:
+            raise RuntimeError(f"{zpath.name} contains multiple matches for {member_suffix}.")
         dest.parent.mkdir(parents=True, exist_ok=True)
-        with z.open(hit) as src, open(dest, "wb") as out:
-            shutil.copyfileobj(src, out, 1 << 20)
+        with tempfile.NamedTemporaryFile(dir=dest.parent, delete=False) as handle:
+            temporary = Path(handle.name)
+        try:
+            _copy_member(z, matches[0], temporary)
+            if writer:
+                writer(temporary, dest)
+            else:
+                temporary.replace(dest)
+        finally:
+            temporary.unlink(missing_ok=True)
 
 
 def extract_tree(zpath: Path, inner_dir: str, dest_dir: str, out_root: Path,
                  only_ext: tuple[str, ...] | None = None,
-                 only_names: tuple[str, ...] | None = None) -> list[Path]:
+                 only_names: tuple[str, ...] | None = None, writer=None) -> list[Path]:
     """Flatten files under inner_dir into out_root/dest_dir.
 
     `only_names` keeps just those file names (case-insensitive) - used to
@@ -556,8 +681,10 @@ def extract_tree(zpath: Path, inner_dir: str, dest_dir: str, out_root: Path,
     written: list[Path] = []
     key = inner_dir.strip("/").lower()
     with zipfile.ZipFile(zpath) as z:
-        for n in z.namelist():
-            if n.endswith("/"):
+        selected, targets = [], set()
+        for info in zip_entries(z):
+            n = info.filename.replace("\\", "/")
+            if info.is_dir():
                 continue
             parts = n.split("/")
             # 'LumeniteFX-mainline/Shaders/x.fx' -> drop the archive root
@@ -575,10 +702,23 @@ def extract_tree(zpath: Path, inner_dir: str, dest_dir: str, out_root: Path,
             try:
                 target = inside(Path(out_root) / dest_dir, tail)
             except OutsideError:
-                continue
+                raise WrongContent(f"Unsafe archive member: {n}") from None
+            if str(target).casefold() in targets:
+                raise WrongContent(f"Multiple archive members write {tail}.")
+            targets.add(str(target).casefold())
+            selected.append((info, target, tail))
+        for info, target, tail in selected:
             target.parent.mkdir(parents=True, exist_ok=True)
-            with z.open(n) as src, open(target, "wb") as out:
-                shutil.copyfileobj(src, out, 1 << 20)
+            with tempfile.NamedTemporaryFile(dir=target.parent, delete=False) as handle:
+                temporary = Path(handle.name)
+            try:
+                _copy_member(z, info, temporary)
+                if writer:
+                    writer(temporary, target)
+                else:
+                    temporary.replace(target)
+            finally:
+                temporary.unlink(missing_ok=True)
             # In the caller's own spelling of the folder: inside() resolves,
             # and a game reached through a junction (a Steam library moved
             # with mklink) resolves to another path - every caller then does
@@ -588,10 +728,13 @@ def extract_tree(zpath: Path, inner_dir: str, dest_dir: str, out_root: Path,
 
 
 def fetch_text(url: str, _try: int = 0) -> bytes:
+    _https_url(url)
     req = urllib.request.Request(url, headers=sources.UA)
     try:
         with urllib.request.urlopen(req, timeout=60, context=ssl_context()) as r:
-            return r.read()
+            if callable(getattr(r, "geturl", None)):
+                _https_url(r.geturl())
+            return read_bounded(r)
     except urllib.error.URLError as e:
         if (isinstance(e, urllib.error.HTTPError)
                 and e.code in RETRY_CODES and _try < RETRIES):

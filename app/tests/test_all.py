@@ -1,7 +1,7 @@
-"""Full verification pass: every module imports, every route installs and
-uninstalls cleanly, and the guard rails actually fire.
+"""Retained upstream reference checks with upstream-specific assumptions.
 
-Run this before cutting a release.
+AIO's shipping gates are the focused suites and package checks in ci.yml;
+this historical suite is not a claim of completed fork validation.
 """
 import atexit
 import inspect
@@ -8166,7 +8166,7 @@ with tempfile.TemporaryDirectory() as _lzma_fixture:
         except RuntimeError as _lzma_error:
             _lzma_message = str(_lzma_error)
     check("...and the LZMA failure says what to install",
-          "lzma" in _lzma_message.lower() and "(7-zip.org)" in _lzma_message.split(), _lzma_message)
+          "listed safely" in _lzma_message.lower() and "(7-zip.org)" in _lzma_message.split(), _lzma_message)
 check("...and 7-Zip is looked for on PATH and in Program Files",
       all(x in src_of(optiscaler._seven_zip)
           for x in ("shutil.which", "Program Files")))
@@ -15156,8 +15156,8 @@ check("...but the same file beside a DLSS 5 install with no record is ours, not 
 check("...so the route for it is the one for a game without DLSS",
       dlss.detect(_left201, _left201, "DX11", 64, 89).recommended == dlss.FEEDER,
       dlss.detect(_left201, _left201, "DX11", 64, 89).recommended)
-check("...a Streamline game keeps its own evidence whatever else is in the folder",
-      _native201(_folder201("nvngx_dlss.dll", "sl.interposer.dll", "dlss5-feed.addon64"), "DX12") is True)
+check("...a Streamline DLSS plugin keeps its own evidence whatever else is in the folder",
+      _native201(_folder201("nvngx_dlss.dll", "sl.dlss.dll", "dlss5-feed.addon64"), "DX12") is True)
 check("...and a runtime we swapped keeps the game's own beside it, which still proves DLSS",
       _native201(_folder201("nvngx_dlss.dll", "nvngx_dlss.dll" + installer.BACKUP_SUFFIX,
                             "dlss5-feed.addon64")) is True)

@@ -540,12 +540,19 @@ function Invoke-Restore {
                     $record = $ledger.Files[$name]
                     if ((Test-ReparsePath $target) -or (Test-ReparsePath $keep)) { throw 'Linked target or backup is not allowed.' }
                     if ((Get-Sha $keep) -ne $record.OriginalSha256) { throw 'Original backup changed; refusing restore.' }
-                    $haveHash = Get-Sha $target
-                    if ($haveHash -notin @($record.OriginalSha256, $record.InstalledSha256, $record.PendingSha256)) { throw 'Target changed outside this tool; refusing restore.' }
+                    $hadTarget = [IO.File]::Exists($target)
+                    $haveHash = if ($hadTarget) { Get-Sha $target } else { $null }
+                    if ($hadTarget -and $haveHash -notin @($record.OriginalSha256, $record.InstalledSha256, $record.PendingSha256)) { throw 'Target changed outside this tool; refusing restore.' }
                     if ($haveHash -eq $record.OriginalSha256) { Write-Host ('  already restored ' + $target); continue }
                     Copy-Item -LiteralPath $keep -Destination $stage -ErrorAction Stop
-                    if ((Get-Sha $stage) -ne $record.OriginalSha256 -or (Get-Sha $target) -ne $haveHash) { throw 'Restore staging or target verification failed.' }
-                    [IO.File]::Replace($stage, $target, $rollback)
+                    if ((Get-Sha $stage) -ne $record.OriginalSha256) { throw 'Restore staging verification failed.' }
+                    if ($hadTarget) {
+                        if ((Get-Sha $target) -ne $haveHash) { throw 'Target changed during restore staging.' }
+                        [IO.File]::Replace($stage, $target, $rollback)
+                    } else {
+                        # Move refuses a file created by another writer while we staged the original.
+                        [IO.File]::Move($stage, $target)
+                    }
                     $replaced = $true
                     if ((Get-Sha $target) -ne $record.OriginalSha256) { throw 'Restored file failed hash verification.' }
                     Write-RefresherLog ('Restored and verified: {0}; SHA256={1}' -f $target, $record.OriginalSha256)
@@ -553,7 +560,7 @@ function Invoke-Restore {
                     $n++
                 } catch {
                     $cause = $_.Exception.Message
-                    if ($replaced) {
+                    if ($replaced -and $hadTarget) {
                         try {
                             [IO.File]::Replace($rollback, $target, [NullString]::Value)
                             if ((Get-Sha $target) -ne $haveHash) { throw 'Rollback verification failed.' }
@@ -701,7 +708,7 @@ if ($Apply -or $Restore -or $SelfTest) {
     }
 }
 $roots = Get-ScanRoots -r $Roots
-Write-RefresherLog ('DLSS5AIO refresher 2.0.0; Apply={0}; Restore={1}; SkipNR={2}; ForceOnline={3}; Roots={4}; Source={5}' -f $Apply, $Restore, $SkipNR, $ForceOnline, ($roots -join ','), $SourceDir)
+Write-RefresherLog ('DLSS5AIO refresher 2.0.1; Apply={0}; Restore={1}; SkipNR={2}; ForceOnline={3}; Roots={4}; Source={5}' -f $Apply, $Restore, $SkipNR, $ForceOnline, ($roots -join ','), $SourceDir)
 if ($Restore) {
     try {
         Write-Host "`nRestoring originals under: $($roots -join ', ')" -ForegroundColor Cyan

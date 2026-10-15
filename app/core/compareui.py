@@ -1,7 +1,7 @@
 """The before/after window: two ReShade screenshots side by side.
 
-Opened from the main window for the selected game. It only reads files, so
-it is safe to leave open while the game runs; "refresh" picks up new shots.
+Opened from the main window for the selected game. It reads screenshots;
+only the explicit export action writes a separate comparison PNG.
 Colours, type and controls come from core/ui so it looks like part of the
 same tool.
 """
@@ -60,6 +60,7 @@ class CompareWindow:
         self._shown: list = [None, None]     # subsampled copies on canvas
         self._text: list = [("", "", ""), ("", "", "")]   # head, file, when
         self._fit_job: str | None = None
+        self._export_job: str | None = None
         self._can = {"swap": False, "export": False}
         self.btn_swap = self.btn_export = None
 
@@ -107,12 +108,14 @@ class CompareWindow:
         self.win.protocol("WM_DELETE_WINDOW", self.close)
 
     def close(self) -> None:
-        if self._fit_job:
-            try:
-                self.win.after_cancel(self._fit_job)
-            except tk.TclError:
-                pass
-            self._fit_job = None
+        for name in ("_fit_job", "_export_job"):
+            job = getattr(self, name, None)
+            if job:
+                try:
+                    self.win.after_cancel(job)
+                except tk.TclError:
+                    pass
+                setattr(self, name, None)
         self.win.destroy()
 
     def _draw_top(self) -> None:
@@ -275,7 +278,6 @@ class CompareWindow:
         if len(self.shots) != 2 or not all(x is not None for x in self._full):
             return
         a, b = self.shots
-        out = compare.export_name(self.install_dir)
         self._enable("export", False)
         self.status.config(text="writing combined png...")
 
@@ -283,7 +285,10 @@ class CompareWindow:
         # frozen button reads as a crash, so tell the user and work after
         # the redraw. Tk images are not thread-safe, so no thread here.
         def go() -> None:
+            self._export_job = None
             try:
+                # Resolve the free name when this Tk job runs, after any other window's export.
+                out = compare.export_name(self.install_dir)
                 compare.export_side_by_side(a, b, out, master=self.win)
                 self.status.config(text=f"saved {out.name} next to the screenshots")
             except (tk.TclError, OSError) as e:
@@ -293,7 +298,7 @@ class CompareWindow:
                     self._enable("export", True)
                 except tk.TclError:
                     pass
-        self.win.after(50, go)
+        self._export_job = self.win.after(50, go)
 
 
 def show(parent, install_dir: Path, game_name: str) -> CompareWindow:

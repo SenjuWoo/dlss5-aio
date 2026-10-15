@@ -3,7 +3,7 @@
 The operating system releases the lock after a crash. Keeping the empty
 sidecar avoids a race caused by deleting a file another process has opened.
 """
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 from functools import wraps
 from pathlib import Path
 import os
@@ -27,6 +27,8 @@ def locked(folder):
     if path.is_symlink():
         raise OSError("The game's AIO lock is a symbolic link; no changes were made.")
     with path.open("a+b") as handle:
+        if os.fstat(handle.fileno()).st_nlink != 1:
+            raise OSError("The AIO lock has multiple hard links; no changes were made.")
         if handle.tell() == 0:
             handle.write(b"\0")
             handle.flush()
@@ -56,6 +58,10 @@ def exclusive(function):
     """Give the install and runtime updater the same game-folder boundary."""
     @wraps(function)
     def wrapped(game, *args, **kwargs):
-        with locked(game.folder):
+        # CLI paths and library roots can differ, but share the executable's directory.
+        folders = {Path(game.folder).resolve(), Path(getattr(game, "install_dir", game.folder)).resolve()}
+        with ExitStack() as stack:
+            for folder in sorted(folders, key=lambda item: os.path.normcase(str(item))):
+                stack.enter_context(locked(folder))
             return function(game, *args, **kwargs)
     return wrapped

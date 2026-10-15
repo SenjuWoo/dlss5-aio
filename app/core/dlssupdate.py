@@ -664,17 +664,8 @@ def settle(g) -> list[str]:
 
 
 def _copy_whole(src: Path, dst: Path) -> None:
-    part = dst.with_name(dst.name + PART_SUFFIX)
-    try:
-        shutil.copyfile(src, part)
-        if _size(part) != _size(src) or net.sha256(part) != net.sha256(src):
-            raise OSError(f"the copy of {src.name} failed byte verification")
-        os.replace(part, dst)
-    finally:
-        try:
-            part.unlink(missing_ok=True)
-        except OSError:
-            pass
+    # Unique staging names cannot overwrite an old file or follow a planted .part link.
+    installer._atomic_copy(src, dst)
 
 
 def _replace_one(g, e: Entry, build: dict, progress) -> str:

@@ -355,6 +355,14 @@ class WatchControl:
             self.quit()
 
     def quit(self) -> None:
+        if self.busy:
+            # Daemon workers must finish their writes before the Tk loop can exit.
+            self._auto_stop = True
+            self.shell.status("finishing the current job before closing...")
+            if not getattr(self, "_quit_pending", False):
+                self._quit_pending = True
+                self.root.after(200, self._finish_close)
+            return
         try:
             self.lookout.stop()
             if self.tray is not None:
@@ -362,6 +370,10 @@ class WatchControl:
         except Exception:
             pass
         self.root.destroy()
+
+    def _finish_close(self) -> None:
+        self._quit_pending = False
+        self.quit()
 
 
 def first_words(text: str, n: int = 60) -> str:

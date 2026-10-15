@@ -50,7 +50,7 @@ def is_reframework(path: Path) -> bool:
         return False
 
 
-def install(exe_dir: Path, log=None) -> list[str]:
+def install(exe_dir: Path, log=None, writer=None) -> list[str]:
     """Drop REFramework's dinput8.dll beside the game. Returns files written.
 
     A dinput8.dll already there is backed up once so uninstall can put it
@@ -64,20 +64,12 @@ def install(exe_dir: Path, log=None) -> list[str]:
     log(f"      REFramework {tag}")
     z = net.download(url, f"REFramework_{tag}.zip")
 
-    written: list[str] = []
+    from . import installer
+    report = installer.Report()
+    writer = writer or (lambda src, dst: installer._copy(src, dst, report, exe_dir))
     existing = exe_dir / DINPUT8
-    bak = existing.with_name(DINPUT8 + BACKUP_SUFFIX)
-    if existing.is_file() and not bak.exists() and not is_reframework(existing):
-        import shutil
-        try:
-            shutil.copy2(existing, bak)
-            written.append(bak.name)
-            log(f"      kept your existing {DINPUT8} as {bak.name}")
-        except OSError:
-            log(f"      WARNING: could not back up the existing {DINPUT8}")
-
-    net.extract_one(z, DINPUT8, existing)
-    written.append(DINPUT8)
+    # The installer journals the staged bytes before committing any game write.
+    net.extract_one(z, DINPUT8, existing, writer=writer)
     log(f"      {DINPUT8} (REFramework - loads first and patches around RE "
         f"Engine's tamper checks, so ReShade survives)")
-    return written
+    return list(dict.fromkeys(report.written + [DINPUT8]))

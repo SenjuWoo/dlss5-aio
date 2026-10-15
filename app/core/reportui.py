@@ -64,7 +64,9 @@ class ReportDialog:
         t = k.text(pad, y, "two questions, then the report opens", T.TEXT, 13, True,
                    anchor="nw")
         t = k.text(pad, bottom(t) + T.px(6),
-                   "the card, driver, route, files and logs are filled in for you.",
+                   "The card, driver, route and log excerpts are filled in. Opening sends "
+                   "the prefilled details to GitHub in the URL. An issue is published "
+                   "only if you submit it there. Review the text before submitting.",
                    T.MUTED, 9, anchor="nw", width=inner)
         y = bottom(t) + T.px(22)
 

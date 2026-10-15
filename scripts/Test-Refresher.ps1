@@ -86,6 +86,9 @@ try {
     Check ($failures -eq 0 -and (Get-Sha $game) -eq $originalHash) 'restore verifies the original'
     $failures = Invoke-Restore @((Split-Path -Parent $game))
     Check ($failures -eq 0) 'restore is repeatable'
+    [IO.File]::Delete($game)
+    $failures = Invoke-Restore @((Split-Path -Parent $game))
+    Check ($failures -eq 0 -and (Get-Sha $game) -eq $originalHash) 'restore recreates a missing runtime from its verified original'
 
     # Fail the final recovery-record commit after a real replacement to prove rollback, not just staging.
     $rollbackGame = Game 'rollback'

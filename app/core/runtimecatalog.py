@@ -6,6 +6,8 @@ Downloads use the application's cache and log, never a game folder.
 from __future__ import annotations
 
 import copy
+import base64
+import json
 import os
 import re
 import shutil
@@ -18,7 +20,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
 
-from . import gamelock, log, net, pe
+from . import log, net, pe
 
 FAMILIES = (
     ("dlss", "nvngx_dlss.dll", "NVIDIA super resolution"),
@@ -207,10 +209,59 @@ def _extract(archive: Path, name: str, dest: Path) -> None:
             shutil.copyfileobj(source, target, 1024 * 1024)
 
 
+def _signature(path: Path) -> dict:
+    """Ask Windows to verify Authenticode; the filename is data, never shell code."""
+    if os.name != "nt":
+        raise ValueError("New mirror runtimes require Windows publisher-signature verification")
+    import ctypes
+    import subprocess
+    from . import child, selfupdate
+    buffer = ctypes.create_unicode_buffer(32768)
+    length = ctypes.windll.kernel32.GetSystemDirectoryW(buffer, len(buffer))
+    if not 0 < length < len(buffer):
+        raise ValueError("Cannot locate Windows signature-verification tools")
+    executable = Path(buffer.value) / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+    script = """$ErrorActionPreference='Stop'
+$env:PSModulePath=Join-Path $PSHOME 'Modules'
+[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
+$signature=Get-AuthenticodeSignature -LiteralPath $env:DLSS5_AIO_VERIFY_PATH
+$signer=''
+if ($signature.SignerCertificate) { $signer=$signature.SignerCertificate.GetNameInfo([Security.Cryptography.X509Certificates.X509NameType]::SimpleName,$false) }
+$product=(Get-Item -LiteralPath $env:DLSS5_AIO_VERIFY_PATH).VersionInfo.ProductName
+@{status=[string]$signature.Status;signer=$signer;product=$product}|ConvertTo-Json -Compress
+"""
+    environment = selfupdate.clean_env()
+    environment["DLSS5_AIO_VERIFY_PATH"] = str(path.resolve())
+    result = child.run([str(executable), "-NoLogo", "-NoProfile", "-NonInteractive",
+                        "-EncodedCommand", base64.b64encode(script.encode("utf-16le")).decode("ascii")],
+                       env=environment, capture_output=True, encoding="utf8", timeout=45,
+                       creationflags=subprocess.CREATE_NO_WINDOW)
+    if result.returncode:
+        raise ValueError("Windows could not verify the runtime's publisher signature")
+    try:
+        return json.loads(result.stdout)
+    except ValueError as error:
+        raise ValueError("Windows returned an invalid publisher-verification result") from error
+
+
+def _verify_publisher(path: Path, family: str) -> None:
+    """A mirror-owned hash cannot prove that a future DLL came from NVIDIA."""
+    signature = _signature(path)
+    if (family not in ("dlss", "dlssg", "dlssd") or not isinstance(signature, dict)
+            or signature.get("status") != "Valid" or signature.get("signer") != "NVIDIA Corporation"):
+        raise ValueError("New mirror runtime has no valid NVIDIA publisher signature")
+    # Signed SR, RR and FG can share a version; a renamed DLL is still the wrong ABI.
+    products = {"dlss": "NVIDIA Deep Learning SuperSampling",
+                "dlssg": "NVIDIA DLSS-G MFGLW",
+                "dlssd": "NVIDIA DLSS Ray Reconstruction"}
+    if signature.get("product") != products[family]:
+        raise ValueError("New mirror runtime's signed product identity differs from its family")
+
+
 def resolve(build: dict, family: str, progress=None) -> Path:
     """Download and validate a catalog build before the updater touches a game."""
     # Different games share digest-addressed downloads and their partial files.
-    with _CACHE_LOCK, gamelock.locked(net.cache_dir()):
+    with _CACHE_LOCK, net.cache_locked():
         return _resolve(build, family, progress)
 
 
@@ -230,14 +281,14 @@ def _resolve(build: dict, family: str, progress=None) -> Path:
     if not isinstance(size, int) or not 0 < size <= MAX_ARCHIVE:
         raise ValueError("Runtime download has no expected size")
     dest = net.cache_dir() / f"runtime-{family}-{digest}.dll"
-    if not raw and _SHA.fullmatch(str(build.get("sha256", ""))) and dest.is_file():
+    if _SHA.fullmatch(str(build.get("sha256", ""))) and dest.is_file():
         try:
             _verify(dest, build["sha256"], int(build.get("size") or 0), build.get("version", ""))
             return dest
         except (ValueError, OSError, pe.PEError, struct.error):
             dest.unlink(missing_ok=True)
     suffix = ".dll" if raw else ".zip"
-    got = net.download(url, f"runtime-{family}-{digest}{suffix}", progress=progress)
+    got = net.download(url, f"runtime-{family}-{digest}{suffix}", progress=progress, max_bytes=size)
     try:
         if got.stat().st_size != size or net.sha256(got) != digest:
             raise ValueError("Runtime download failed its source SHA256/size check")
@@ -249,6 +300,8 @@ def _resolve(build: dict, family: str, progress=None) -> Path:
         try:
             _extract(got, FILE_OF[family], temporary)
             _verify(temporary, build.get("sha256", ""), int(build.get("size") or 0), build.get("version", ""))
+            if not build.get("sha256"):
+                _verify_publisher(temporary, family)
             temporary.replace(dest)
         finally:
             temporary.unlink(missing_ok=True)

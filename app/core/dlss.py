@@ -73,10 +73,8 @@ REMIX = "remix"
 ALL_ROUTES = (RENODX, NATIVE, UPSTREAM, OPTI, BRIDGE, FEEDER, STANDALONE,
               REMIX)
 
-# Streamline is NVIDIA's own plugin layer; if a game ships it, it ships DLSS.
-# These are never files this tool installs, so they are unambiguous.
-STREAMLINE = ("sl.interposer.dll", "sl.dlss.dll", "sl.common.dll",
-              "sl.dlss_g.dll", "sl.reflex.dll")
+# Streamline's base and Reflex plugins can ship without DLSS Super Resolution.
+STREAMLINE = ("sl.dlss.dll",)
 # A game's own runtime, or one renamed by a user to disable it.
 OWN_RUNTIME = ("nvngx_dlss.dlsss", "nvngx_dlss.dll.bak", "_nvngx.dll")
 
@@ -85,7 +83,7 @@ OWN_RUNTIME = ("nvngx_dlss.dlsss", "nvngx_dlss.dll.bak", "_nvngx.dll")
 # (Kingdom Come 2) under Bin/Win64Shared, others under their own names. A
 # bounded walk finds them; the folders below never hold DLLs and can be
 # hundreds of thousands of files, so they are skipped outright.
-DLSS_FILES = ("nvngx_dlss.dll", "sl.interposer.dll", "sl.dlss.dll",
+DLSS_FILES = ("nvngx_dlss.dll", "sl.dlss.dll",
               "nvngx_dlssg.dll", "nvngx_dlssd.dll")
 _SKIP_DIRS = {"content", "paks", "saved", "logs", "movies", "sounds", "music",
               "videos", "localization", "shadercache", "derivedcache", "cache",
@@ -113,8 +111,9 @@ _WALK_SECONDS = 6.0
 FSR_FILES = ("ffx_fsr2_api_x64.dll", "ffx_fsr2_api_dx12_x64.dll",
              "ffx_fsr2_api_vk_x64.dll", "ffx_fsr3upscaler_x64.dll",
              "ffx_fsr3_x64.dll", "amd_fidelityfx_dx12.dll",
-             "amd_fidelityfx_vk.dll", "ffx_backend_dx12_x64.dll")
-XESS_FILES = ("libxess.dll", "libxess_dx11.dll", "libxess_fg.dll")
+             "amd_fidelityfx_vk.dll")
+# FG and the shared FidelityFX backend do not prove an SR input to hook.
+XESS_FILES = ("libxess.dll", "libxess_dx11.dll")
 UPSCALER_FILES = FSR_FILES + XESS_FILES
 UPSCALER_NAMES = {"fsr": "AMD FSR 2/3", "xess": "Intel XeSS"}
 # OptiScaler's own package carries libxess.dll and amd_fidelityfx_*.dll under
@@ -359,7 +358,9 @@ def _ours(folder: Path, name: str) -> bool:
         try:
             import json
             data = json.loads(man.read_text(encoding="utf8"))
-            return name in data.get("files", [])
+            files = data.get("files") or data.get("dosyalar") or []
+            return name.casefold() in {f.replace("\\", "/").casefold()
+                                       for f in files if isinstance(f, str)}
         except Exception:
             return False
     # no record: an NGX runtime standing in a folder that carries a DLSS 5
@@ -403,7 +404,7 @@ def detect(install_dir: Path, folder: Path, api: str, bitness: int,
         # they actually used are steered off the feeder; the rest keep the
         # proven route and see OptiScaler as an option.
         s.recommended = OPTI
-        s.reason = (f"This game has no DLSS but ships {UPSCALER_NAMES[s.upscaler]} "
+        s.reason = (f"No DLSS runtime found; {UPSCALER_NAMES[s.upscaler]} runtime files detected "
                     f"({', '.join(s.upscaler_evidence[:3])}). OptiScaler takes "
                     f"those calls as its input - once FSR/XeSS is switched on "
                     f"in the game's own settings; with no such setting it has "
@@ -662,20 +663,7 @@ def _detect_routes(install_dir: Path, folder: Path, api: str,
         for m in (DLSSD_NAME, DLSSG_NAME):
             if (d / m).is_file() and _theirs(d, m):
                 s.evidence.append(m)
-    # The walk runs when the loop above left something to find: the usual
-    # "no DLSS beside the executable" case, and one more. An Unreal game
-    # puts sl.interposer.dll beside the exe and the runtimes themselves
-    # under Engine/Plugins, so native_dlss gets answered without any NGX
-    # runtime having been seen - and the GUI reads that answer to decide
-    # whether to offer the ray-reconstruction swap.
-    #
-    # The ray-reconstruction runtime is nested often enough that "found
-    # something beside the exe" is not an answer about it: an Unreal game
-    # keeps sl.interposer.dll by the executable and the runtimes under
-    # Engine/Plugins, and plenty of games keep nvngx_dlss.dll by the
-    # executable with nvngx_dlssd.dll deeper in. The walk answers both, and
-    # `walked` remembers it, so the budget is paid once per game rather
-    # than on every click - which is what #8, #18 and #32 were about.
+    # A found SR plugin does not answer whether the engine has a nested RR runtime.
     answered = s.native_dlss
     seen_rr = any(str(e).lower().endswith(DLSSD_NAME) for e in s.evidence)
     if not answered or not seen_rr:
@@ -687,7 +675,9 @@ def _detect_routes(install_dir: Path, folder: Path, api: str,
             # a Streamline game reported less evidence than it had.
             if answered and base not in (DLSSD_NAME, DLSSG_NAME):
                 continue
-            s.native_dlss = True
+            # Frame generation or ray reconstruction alone cannot supply SR calls.
+            if base in ("nvngx_dlss.dll", *STREAMLINE):
+                s.native_dlss = True
             s.evidence.append(rel)
     s.evidence = sorted(set(s.evidence))
 
@@ -698,7 +688,7 @@ def _detect_routes(install_dir: Path, folder: Path, api: str,
         # wrote), then the engine's own folders.
         for d in {install_dir, folder}:
             for m in UPSCALER_FILES:
-                if (d / m).is_file() and not _ours(d, m):
+                if (d / m).is_file() and _theirs(d, m):
                     s.upscaler_evidence.append(m)
         if not s.upscaler_evidence:
             s.upscaler_evidence = find_upscaler_files(folder, skip_dir=install_dir)
@@ -819,8 +809,8 @@ def _detect_routes(install_dir: Path, folder: Path, api: str,
         # proxy, which a Vulkan game never loads.
         s.options = [FEEDER, OPTI, BRIDGE, STANDALONE, RENODX]
         s.recommended = FEEDER
-        s.reason = (f"No DLSS in this game, but it ships "
-                    f"{UPSCALER_NAMES[s.upscaler]} "
+        s.reason = (f"No DLSS runtime found; detected "
+                    f"{UPSCALER_NAMES[s.upscaler]} runtime files "
                     f"({', '.join(s.upscaler_evidence[:3])}). The feeder "
                     f"builds a DLAA contract from ReShade's depth and shader "
                     f"motion vectors - the most proven way. OptiScaler can "

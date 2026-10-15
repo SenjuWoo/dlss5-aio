@@ -105,9 +105,22 @@ def cli(target: Path, remove: bool, check: bool, route: str = "",
         vr: bool = False, opti_build: str = "", gpu_pref: bool = True,
         own_fg: str = "") -> int:
     g = game or games.manual(target)
-    if not g.exe:
+    recorded = any((g.install_dir / name).is_file()
+                   for name in (installer.MANIFEST,) + installer.LEGACY_MANIFESTS)
+    if not g.exe and not (remove and recorded):
         print(f"error: no executable found in {target}", file=sys.stderr)
         return 1
+    # Recovery depends on the saved files, not whether a fresh install fits this PC.
+    if remove:
+        try:
+            removed = installer.uninstall(g, on_log=print)
+        except Exception as e:
+            from core import log
+            log.exception("removing neural installation", e)
+            print(f"error: {e}", file=sys.stderr)
+            return 1
+        print(f"Removed {len(removed)} items from {g.install_dir}.")
+        return 0
     need = installer.wants_dxvk(g)
     use_dxvk = bool(need) if dxvk is None else dxvk
     card, sm = gpu.detect()
@@ -161,11 +174,11 @@ def cli(target: Path, remove: bool, check: bool, route: str = "",
         print(f"          {'*' if o == sup.recommended else ' '} {o:<11}"
               f"{'' if usable else 'NOT FOR THIS PC - '}{note}")
     if sup.native_dlss:
-        print(f"          this game ships its own DLSS "
+        print(f"          DLSS runtime files detected "
               f"({', '.join(sup.evidence[:3])})")
     elif sup.upscaler:
-        print(f"          this game ships {dlss.UPSCALER_NAMES[sup.upscaler]} "
-              f"and no DLSS ({', '.join(sup.upscaler_evidence[:3])})")
+        print(f"          {dlss.UPSCALER_NAMES[sup.upscaler]} runtime files detected "
+              f"and no DLSS found ({', '.join(sup.upscaler_evidence[:3])})")
     if sup.reason:
         print(f"          {sup.reason}")
     print(f"outlook : {level} - {why_rel}")
@@ -223,14 +236,10 @@ def cli(target: Path, remove: bool, check: bool, route: str = "",
             gp = installer._gpu_pref_line(g.install_dir, g, popt)
             if gp:
                 print(f"outside  : {gp} (--no-gpu-pref to skip)")
-        return 1 if refused else 0
+        return 0 if ok and not refused else 1
     if not ok:
         print(f"error: {why}", file=sys.stderr)
         return 1
-
-    if remove:
-        installer.uninstall(g, on_log=print)
-        return 0
 
     try:
         rep = installer.install(

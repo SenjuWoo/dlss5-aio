@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import shutil
 import struct
 import subprocess
@@ -104,9 +105,10 @@ def _prune_old_staging(max_age: float = 24 * 3600) -> None:
 def _fetch(workdir: Path, progress=None) -> Path:
     rel = net.json_get(update.API)
     assets = rel.get("assets", [])
-    zip_url = next((a["browser_download_url"] for a in assets
+    zipped_asset = next((a for a in assets
                     if a["name"].lower().startswith("dlss5-aio")
                     and a["name"].lower().endswith(".zip")), None)
+    zip_url = zipped_asset["browser_download_url"] if zipped_asset else None
     exe_url = next((a["browser_download_url"] for a in assets
                     if a["name"].lower() == "dlss5-aio.exe"), None)
     sums_url = next((a["browser_download_url"] for a in assets
@@ -114,16 +116,29 @@ def _fetch(workdir: Path, progress=None) -> Path:
     tag = (rel.get("tag_name") or "new").lstrip("vV")
     if not sums_url:
         raise UpdateError("The release has no SHA256SUMS.txt; refusing an unverified update.")
+    if not zip_url and not exe_url:
+        raise UpdateError("The release has no downloadable build.")
+    try:
+        sums = net.fetch_text(sums_url).decode("utf8", "strict")
+    except Exception as e:
+        raise UpdateError(f"Could not read SHA256SUMS.txt ({e}); refusing an unverified update.") from e
+    tag = re.sub(r"[^A-Za-z0-9._-]", "_", tag)
 
     if zip_url:
         z = net.download(zip_url, f"update-{tag}.zip", progress=progress)
+        # One-folder updates load native DLLs too: authenticate the whole archive.
+        expected_archive = _expected_hash(sums, zipped_asset["name"])
+        if not expected_archive or net.sha256(z) != expected_archive:
+            raise UpdateError("The release archive does not match SHA256SUMS.txt; refusing it.")
         with zipfile.ZipFile(z) as arc:
-            member = next((n for n in arc.namelist()
-                           if n.replace("\\", "/").split("/")[-1].lower() == "dlss5-aio.exe"), None)
-            if not member:
-                raise UpdateError("The release archive contains no executable.")
+            names = [info.filename for info in net.zip_entries(arc)]
+            executables = [n for n in names
+                           if n.replace("\\", "/").split("/")[-1].lower() == "dlss5-aio.exe"]
+            if len(executables) != 1:
+                raise UpdateError("The release archive must contain exactly one executable.")
+            member = executables[0]
             base = member.rsplit("/", 1)[0] + "/" if "/" in member else ""
-            folder = [n for n in arc.namelist()
+            folder = [n for n in names
                       if n.startswith(base + INTERNAL + "/") and not n.endswith("/")]
             if folder:
                 # One-folder build: the .exe and everything under _internal,
@@ -142,12 +157,12 @@ def _fetch(workdir: Path, progress=None) -> Path:
                         ) from None
                     dest.parent.mkdir(parents=True, exist_ok=True)
                     with arc.open(n) as src, open(dest, "wb") as dst:
-                        dst.write(src.read())
+                        shutil.copyfileobj(src, dst, 1 << 20)
                 out = workdir / Path(member).name
             else:
                 out = workdir / Path(member).name
                 with arc.open(member) as src, open(out, "wb") as dst:
-                    dst.write(src.read())
+                    shutil.copyfileobj(src, dst, 1 << 20)
     elif exe_url:
         got = net.download(exe_url, f"update-{tag}.exe", progress=progress)
         out = workdir / got.name
@@ -169,11 +184,6 @@ def _fetch(workdir: Path, progress=None) -> Path:
                           "executable - refusing to install it.")
     # A fork release must publish an exact executable checksum before it can run.
     if sums_url:
-        try:
-            sums = net.fetch_text(sums_url).decode("utf8", "replace")
-        except Exception as e:
-            raise UpdateError(f"Could not read SHA256SUMS.txt for the release "
-                              f"({e}) - refusing to install an unverified build.") from e
         want = _expected_hash(sums, "DLSS5-AIO.exe")
         if not want:
             raise UpdateError("SHA256SUMS.txt does not list DLSS5-AIO.exe "
@@ -188,11 +198,15 @@ def _fetch(workdir: Path, progress=None) -> Path:
 
 def _expected_hash(sums: str, name: str) -> str | None:
     """The hash for `name` from a sha256sum-style listing (paths allowed)."""
+    found = []
     for line in sums.splitlines():
         parts = line.strip().split()
-        if len(parts) >= 2 and parts[1].lstrip("*").replace("\\", "/").endswith(name):
-            return parts[0].lower()
-    return None
+        if (len(parts) == 2 and re.fullmatch(r"[A-Fa-f0-9]{64}", parts[0])
+                and parts[1].lstrip("*").replace("\\", "/").rsplit("/", 1)[-1] == name):
+            found.append(parts[0].lower())
+    if len(found) > 1:
+        raise UpdateError(f"SHA256SUMS.txt lists {name} more than once; refusing an ambiguous update.")
+    return found[0] if found else None
 
 
 def _sha256(p: Path) -> str:
@@ -215,12 +229,16 @@ def swap_script(current: Path, new_exe: Path) -> str:
     old, old_int = old_build(current)
     new_int = new_exe.parent / INTERNAL
     cur_int = current.parent / INTERNAL
+    # Batch expands percent variables even inside quotes; these are literal paths.
+    def literal(path):
+        return str(path).replace("%", "%%")
     lines = [
         "@echo off",
-        "setlocal",
-        f'set "TARGET={current}"',
-        f'set "SOURCE={new_exe}"',
-        f'set "BACKUP={old}"',
+        "chcp 65001 >nul",
+        "setlocal DisableDelayedExpansion",
+        f'set "TARGET={literal(current)}"',
+        f'set "SOURCE={literal(new_exe)}"',
+        f'set "BACKUP={literal(old)}"',
         "for /L %%i in (1,1,30) do (",
         "  ping -n 2 127.0.0.1 >nul",
         '  if exist "%BACKUP%" del /q "%BACKUP%" >nul 2>&1',
@@ -239,19 +257,24 @@ def swap_script(current: Path, new_exe: Path) -> str:
         # exe is copied too, for the same reason; the old pair stays as
         # .old.exe + _internal.old until settle() removes it.
         lines += [
-            f'if exist "{old_int}" rmdir /s /q "{old_int}" >nul 2>&1',
-            f'if exist "{cur_int}" move /y "{cur_int}" "{old_int}" >nul 2>&1',
-            f'xcopy "{new_int}" "{cur_int}\\" /E /I /Q /Y /H >nul 2>&1',
+            f'if exist "{literal(old_int)}" rmdir /s /q "{literal(old_int)}" >nul 2>&1',
+            f'if exist "{literal(old_int)}" goto restoreexe',
+            f'if exist "{literal(cur_int)}" move /y "{literal(cur_int)}" "{literal(old_int)}" >nul 2>&1',
+            f'if exist "{literal(cur_int)}" goto restoreexe',
+            f'xcopy "{literal(new_int)}" "{literal(cur_int)}\\" /E /I /Q /Y /H >nul 2>&1',
             f'if errorlevel 1 goto rollback',
-            f'if not exist "{cur_int}\\*" goto rollback',
+            f'if not exist "{literal(cur_int)}\\*" goto rollback',
             'copy /y "%SOURCE%" "%TARGET%" >nul 2>&1',
             'if errorlevel 1 goto rollback',
-            f'rmdir /s /q "{new_int}" >nul 2>&1',
+            'fc /b "%SOURCE%" "%TARGET%" >nul 2>&1',
+            'if errorlevel 1 goto rollback',
+            f'rmdir /s /q "{literal(new_int)}" >nul 2>&1',
             'del /q "%SOURCE%" >nul 2>&1',
             'goto done',
             ':rollback',
-            f'if exist "{cur_int}" rmdir /s /q "{cur_int}" >nul 2>&1',
-            f'if exist "{old_int}" move /y "{old_int}" "{cur_int}" >nul 2>&1',
+            f'if exist "{literal(cur_int)}" rmdir /s /q "{literal(cur_int)}" >nul 2>&1',
+            f'if exist "{literal(old_int)}" move /y "{literal(old_int)}" "{literal(cur_int)}" >nul 2>&1',
+            ':restoreexe',
             'if exist "%TARGET%" del /q "%TARGET%" >nul 2>&1',
             'move /y "%BACKUP%" "%TARGET%" >nul 2>&1',
             'echo The update could not be applied; the previous build was restored.',
@@ -260,13 +283,21 @@ def swap_script(current: Path, new_exe: Path) -> str:
     else:
         lines += [
             'copy /y "%SOURCE%" "%TARGET%" >nul 2>&1',
-            'if not exist "%TARGET%" move /y "%BACKUP%" "%TARGET%" >nul 2>&1',
+            'if errorlevel 1 goto rollback',
+            'fc /b "%SOURCE%" "%TARGET%" >nul 2>&1',
+            'if errorlevel 1 goto rollback',
             'del /q "%SOURCE%" >nul 2>&1',
+            'goto done',
+            ':rollback',
+            'if exist "%TARGET%" del /q "%TARGET%" >nul 2>&1',
+            'move /y "%BACKUP%" "%TARGET%" >nul 2>&1',
+            'echo The update could not be applied; the previous build was restored.',
+            ':done',
         ]
     if new_exe.parent.name.startswith(PREFIX):
         # Our own staging folder, now empty: rmdir without /s removes
         # nothing else, so a folder that still holds anything stays.
-        lines.append(f'rmdir "{new_exe.parent}" >nul 2>&1')
+        lines.append(f'rmdir "{literal(new_exe.parent)}" >nul 2>&1')
     lines += [
         # The new build must start as a fresh top-level process, not as a
         # child of the onefile bootloader we were: without this its own
@@ -361,7 +392,8 @@ def apply_and_restart(new_exe: Path) -> None:
     bat.write_text(swap_script(current, new_exe), encoding="utf8")
 
     creation = 0x00000008 | 0x08000000        # DETACHED_PROCESS | NO_WINDOW
-    subprocess.Popen(["cmd", "/c", str(bat)], creationflags=creation,
+    command = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "cmd.exe"
+    subprocess.Popen([str(command), "/d", "/c", bat.name], creationflags=creation,
                      close_fds=True, cwd=str(Path(tempfile.gettempdir())),
                      env=clean_env())
     os._exit(0)

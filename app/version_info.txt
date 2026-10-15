@@ -1,16 +1,16 @@
 # Windows file properties identify this executable and match the release version.
 VSVersionInfo(
-  ffi=FixedFileInfo(filevers=(2, 0, 0, 0), prodvers=(2, 0, 0, 0), mask=0x3f,
+  ffi=FixedFileInfo(filevers=(2, 0, 1, 0), prodvers=(2, 0, 1, 0), mask=0x3f,
                     flags=0, OS=0x40004, fileType=1, subtype=0, date=(0, 0)),
   kids=[StringFileInfo([StringTable('040904B0', [
       StringStruct('CompanyName', 'SenjuWoo'),
       StringStruct('FileDescription', 'DLSS 5 AIO game DLL and neural rendering manager'),
-      StringStruct('FileVersion', '2.0.0.0'),
+      StringStruct('FileVersion', '2.0.1.0'),
       StringStruct('InternalName', 'DLSS5-AIO'),
       StringStruct('LegalCopyright', 'MIT licensed. Upstream copyrights preserved in UPSTREAM-LICENSE.txt.'),
       StringStruct('OriginalFilename', 'DLSS5-AIO.exe'),
       StringStruct('ProductName', 'DLSS 5 AIO'),
-      StringStruct('ProductVersion', '2.0.0.0'),
+      StringStruct('ProductVersion', '2.0.1.0'),
       StringStruct('Comments', 'https://github.com/SenjuWoo/dlss5-aio')
   ])]), VarFileInfo([VarStruct('Translation', [1033, 1200])])]
 )

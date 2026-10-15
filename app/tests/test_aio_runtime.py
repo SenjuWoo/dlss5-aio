@@ -68,6 +68,49 @@ class RuntimeIntegration(unittest.TestCase):
         self.assertEqual({entry.family for entry in du.scan(self.game)},
                          {"dlss", "xess", "fsr31_dx12"})
 
+    def test_copy_does_not_reuse_or_remove_an_existing_part_file(self):
+        target = self.runtime("xess")
+        sentinel = target.with_name(target.name + du.PART_SUFFIX)
+        sentinel.write_bytes(b"unclaimed previous file")
+        source = self.builds / "source.dll"
+        source.write_bytes(dll("2.0.0", size=8192))
+        du._copy_whole(source, target)
+        self.assertEqual(target.read_bytes(), source.read_bytes())
+        self.assertEqual(sentinel.read_bytes(), b"unclaimed previous file")
+
+    def test_hardlinked_lock_never_changes_the_other_file(self):
+        folder = self.root / "linked-lock-game"
+        folder.mkdir()
+        original = self.root / "unowned-empty-file"
+        original.touch()
+        os.link(original, folder / ".dlss5-aio.lock")
+        with self.assertRaisesRegex(OSError, "hard links"):
+            with gamelock.locked(folder):
+                self.fail("accepted hardlinked lock")
+        self.assertEqual(original.read_bytes(), b"")
+
+    def test_game_mutation_also_locks_the_executable_directory(self):
+        binary = self.root / "bin"
+        binary.mkdir()
+        game = games.Game("nested", self.root, binary / "Game.exe", 64, "DX12")
+        failures = []
+        writes = []
+        @gamelock.exclusive
+        def mutation(selected):
+            writes.append(True)
+        def worker():
+            try:
+                mutation(game)
+            except OSError as error:
+                failures.append(str(error))
+        with gamelock.locked(binary):
+            thread = threading.Thread(target=worker)
+            thread.start()
+            thread.join(timeout=5)
+            self.assertFalse(thread.is_alive())
+        self.assertTrue(failures)
+        self.assertFalse(writes)
+
     def test_update_and_offline_restore_all_vendors(self):
         families = ("dlss", "xess", "fsr31_dx12")
         targets = [self.runtime(family, nested=family != "dlss") for family in families]
@@ -152,7 +195,7 @@ class RuntimeIntegration(unittest.TestCase):
         actual_copy = du.shutil.copyfile
         def corrupt(source, destination):
             result = actual_copy(source, destination)
-            if str(destination).endswith(du.PART_SUFFIX):
+            if str(destination).endswith(".aio-part"):
                 Path(destination).write_bytes(b"X" * Path(destination).stat().st_size)
             return result
         with patch.object(du.runtimecatalog, "resolve", side_effect=self.resolve), \

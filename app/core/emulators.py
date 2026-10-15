@@ -19,9 +19,11 @@ buffer manually from ReShade's DX11/DX12 tab.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import re
-import shutil
+import tempfile
 from dataclasses import dataclass
 import pathlib
 from pathlib import Path
@@ -475,7 +477,41 @@ def _read(path: Path) -> str:
 
 
 def _write(path: Path, text: str) -> None:
-    path.write_bytes(text.encode("utf-8", errors="surrogateescape"))
+    """Stage bytes so a locked or failed config replacement keeps the old file whole."""
+    from . import net
+    from .installer import _atomic_copy
+    before = net.sha256(path) if path.exists() else None
+    staged = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=path.parent, suffix=".aio-part", delete=False) as handle:
+            staged = Path(handle.name)
+            handle.write(text.encode("utf-8", errors="surrogateescape"))
+            handle.flush()
+            os.fsync(handle.fileno())
+        if (net.sha256(path) if path.exists() else None) != before:
+            raise OSError(f"{path.name} changed while its update was staged; no replacement was made.")
+        _atomic_copy(staged, path)
+    finally:
+        if staged is not None:
+            staged.unlink(missing_ok=True)
+
+
+BACKEND_RECORD_SUFFIX = ".dlss5-aio-backend.json"
+
+
+def _backend_record(cfg: Path, spec: _Backend) -> dict:
+    """Only a durable byte record proves that an adjacent backup is ours to restore."""
+    record = cfg.with_name(cfg.name + BACKEND_RECORD_SUFFIX)
+    try:
+        data = json.loads(_read(record))
+    except (OSError, ValueError) as error:
+        raise OSError(f"{cfg.name}: the backend recovery record cannot be read; backup kept.") from error
+    if not isinstance(data, dict) or data.get("target") != spec.target or any(
+            not isinstance(data.get(key), str) or len(data[key]) != 64
+            or any(c not in "0123456789abcdef" for c in data[key])
+            for key in ("original_sha256", "written_sha256")):
+        raise OSError(f"{cfg.name}: the backend recovery record is invalid; backup kept.")
+    return data
 
 
 def _is_header(line: str, section: str) -> bool:
@@ -597,41 +633,92 @@ def set_backend(profile: Profile, exe: Path) -> list[str]:
     if not cfg:
         return [f"{profile.name}: config file not found (run the emulator once first). "
                 f"Set the backend by hand: {profile.renderer_hint}"]
-    try:
+    from . import net, prefs
+    from .installer import _atomic_copy
+    with prefs.mutation_lock():
+        net.inside(cfg.parent, str(cfg.absolute()), absolute_ok=True)
         text = _read(cfg)
-    except OSError as e:
-        return [f"{profile.name}: could not read {cfg} ({e}). "
-                f"Set the backend by hand: {profile.renderer_hint}"]
-    lines = text.splitlines(keepends=True)
-    raw = _raw_value(lines, spec)
-    if raw is not None and (raw in spec.dxgi or raw.lower() in spec.dxgi):
-        return [f"{profile.name}: backend already {_human(spec, raw)} in {cfg}"]
-    backup = cfg.with_name(cfg.name + BACKUP_SUFFIX)
-    if not backup.exists():
-        shutil.copy2(cfg, backup)
-    _write(cfg, "".join(_set_value(lines, spec, spec.target)))
-    old = _human(spec, raw) if raw is not None else "(not set)"
-    where = f"[{spec.section}] {spec.key}" if spec.section else spec.key
-    return [f"{profile.name}: {cfg}: {where}: {old} -> {spec.target_name}",
-            f"backup: {backup}"]
+        lines = text.splitlines(keepends=True)
+        raw = _raw_value(lines, spec)
+        if raw is not None and (raw in spec.dxgi or raw.lower() in spec.dxgi):
+            return [f"{profile.name}: backend already {_human(spec, raw)} in {cfg}"]
+        backup = cfg.with_name(cfg.name + BACKUP_SUFFIX)
+        record = cfg.with_name(cfg.name + BACKEND_RECORD_SUFFIX)
+        net.inside(cfg.parent, str(backup.absolute()), absolute_ok=True)
+        net.inside(cfg.parent, str(record.absolute()), absolute_ok=True)
+        original = net.sha256(cfg)
+        if backup.exists() or record.exists():
+            data = _backend_record(cfg, spec)
+            if not backup.is_file() or net.sha256(backup) != data["original_sha256"]:
+                raise OSError(f"{cfg.name}: its original backend backup is missing or changed; no setting was replaced.")
+        else:
+            data = {"target": spec.target, "original_sha256": original}
+        replacement = "".join(_set_value(lines, spec, spec.target))
+        # The record precedes the config write so a failed swap remains recoverable.
+        data["written_sha256"] = hashlib.sha256(replacement.encode("utf8", errors="surrogateescape")).hexdigest()
+        _write(record, json.dumps(data, indent=2))
+        if not backup.exists():
+            _atomic_copy(cfg, backup)
+        if net.sha256(backup) != data["original_sha256"]:
+            raise OSError(f"{cfg.name} changed while its original backup was staged; no setting was replaced.")
+        if net.sha256(cfg) != original:
+            raise OSError(f"{cfg.name} changed during its backend update; no setting was replaced.")
+        _write(cfg, replacement)
+        old = _human(spec, raw) if raw is not None else "(not set)"
+        where = f"[{spec.section}] {spec.key}" if spec.section else spec.key
+        return [f"{profile.name}: {cfg}: {where}: {old} -> {spec.target_name}",
+                f"backup: {backup}"]
 
 
 def restore_backend(profile: Profile, exe: Path) -> list[str]:
-    """Undo set_backend(): the backed-up config comes back, the backup goes."""
+    """Restore only our backend setting, preserving later unrelated config changes."""
     spec = _BACKENDS.get(profile.key)
     if not spec:
         return []
+    from . import net, prefs
+    from .installer import _atomic_copy
     notes: list[str] = []
-    for cfg in spec.locate(exe):
-        backup = cfg.with_name(cfg.name + BACKUP_SUFFIX)
-        try:
-            if not backup.is_file():
+    with prefs.mutation_lock():
+        for cfg in spec.locate(exe):
+            backup = cfg.with_name(cfg.name + BACKUP_SUFFIX)
+            record = cfg.with_name(cfg.name + BACKEND_RECORD_SUFFIX)
+            if not backup.exists() and not record.exists():
                 continue
-            shutil.copy2(backup, cfg)
+            for path in (cfg, backup, record):
+                net.inside(cfg.parent, str(path.absolute()), absolute_ok=True)
+            data = _backend_record(cfg, spec)
+            if not backup.is_file():
+                if cfg.is_file() and net.sha256(cfg) in (data["original_sha256"], data.get("restored_sha256")):
+                    record.unlink()
+                    notes.append(f"{profile.name}: backend already restored in {cfg}")
+                    continue
+                raise OSError(f"{cfg.name}: its original backend backup is missing; recovery record kept.")
+            if net.sha256(backup) != data["original_sha256"]:
+                raise OSError(f"{cfg.name}: its original backend backup changed; config and backup kept.")
+            original = _read(backup)
+            original_lines = original.splitlines(keepends=True)
+            if cfg.exists():
+                current = _read(cfg)
+                current_lines = current.splitlines(keepends=True)
+                raw = _raw_value(current_lines, spec)
+                previous = _raw_value(original_lines, spec)
+                if raw not in (spec.target, previous):
+                    raise OSError(f"{cfg.name}: its backend was changed after installation; config and backup kept.")
+                # Compare with the first generated config, not a later reinstall's full-file hash.
+                initial = "".join(_set_value(original_lines, spec, spec.target))
+                if current == initial or current == original:
+                    _atomic_copy(backup, cfg)
+                else:
+                    merged = (_set_value(current_lines, spec, previous) if previous is not None
+                              else [line for i, line in enumerate(current_lines) if i != _find_line(current_lines, spec)])
+                    _write(cfg, "".join(merged))
+            else:
+                _atomic_copy(backup, cfg)
+            data["restored_sha256"] = net.sha256(cfg)
+            _write(record, json.dumps(data, indent=2))
             backup.unlink()
+            record.unlink()
             notes.append(f"{profile.name}: restored {cfg} from its backup")
-        except OSError as e:
-            notes.append(f"{profile.name}: could not restore {cfg} ({e})")
     if not notes:
         notes.append(f"{profile.name}: no backend backup to restore")
     return notes

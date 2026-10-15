@@ -21,7 +21,6 @@ class InstallerRuntimeSources(unittest.TestCase):
             ("https://api.github.com.example.invalid/releases", False),
             ("https://example.invalid/api.github.com/releases", False),
             ("https://example.invalid/?next=api.github.com", False),
-            ("https://api.github.com@example.invalid/releases", False),
         )
         for read in (sources._get, net.fetch_text):
             for code in (403, 429):
@@ -33,6 +32,13 @@ class InstallerRuntimeSources(unittest.TestCase):
                         expected = sources.RateLimited if api else urllib.error.HTTPError
                         with self.assertRaises(expected):
                             read(url)
+
+    def test_embedded_credential_host_spoof_is_rejected_before_transport(self):
+        for read in (sources._get, net.fetch_text):
+            with self.subTest(read=read.__name__), patch.object(net.urllib.request, "urlopen") as transport:
+                with self.assertRaises(ValueError):
+                    read("https://api.github.com@example.invalid/releases")
+                transport.assert_not_called()
 
     def test_auto_uses_newest_verified_runtime_and_keeps_sdk_choice(self):
         with patch.object(sources, "latest_tag", side_effect=AssertionError("network")):

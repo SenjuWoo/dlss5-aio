@@ -169,7 +169,7 @@ def fault_in_this_folder(crash, install_dir) -> bool:
         here = str(Path(install_dir).resolve()).replace("/", "\\").lower()
     except (OSError, ValueError, TypeError):
         return True
-    return here.rstrip("\\") in mod.lower()
+    return mod.lower().startswith(here.rstrip("\\") + "\\")
 
 
 # OptiScaler's own unload. A process that faults does not write it: Windows
@@ -418,9 +418,9 @@ class GameControl:
             self.write(f"> {g.exe.name if g.exe else g.name} closes itself when ReShade loads inside it - it "
                        f"runs through DXVK (Vulkan) instead, with ReShade as a Vulkan layer.", "ok")
         if sup.native_dlss:
-            self.write(f"> this game ships its own dlss ({', '.join(sup.evidence[:3])})", "ok")
+            self.write(f"> dlss runtime files detected ({', '.join(sup.evidence[:3])})", "ok")
         elif getattr(sup, "upscaler", ""):
-            self.write(f"> no dlss, but the game ships {sup.upscaler.upper()} "
+            self.write(f"> no dlss found; {sup.upscaler.upper()} runtime files detected "
                        f"({', '.join(sup.upscaler_evidence[:2])}) - optiscaler can redirect those calls "
                        f"into dlss, then neural rendering", "ok")
         elif g.api in ("DX11", "DX12", "Unknown") and g.bitness == 64:
@@ -1072,6 +1072,8 @@ class GameControl:
             return
         if not self._anticheat_ok("install anyway"):
             return
+        if self.busy or self.game is not g:
+            return
         self.busy, self.action, self.progress = True, "installing", (0, "starting")
         self.job_game = g
         self.result = None
@@ -1243,6 +1245,8 @@ class GameControl:
             return
         if not self._anticheat_ok("go on anyway"):
             return
+        if self.busy or self.game is not g:
+            return
         opt = self.opts()
         offer = list(self.support.options or [self.route])
         planned = autopilot.plan(self.route or opt.path, offer, self._community, g, klass=self.game_class())
@@ -1275,6 +1279,8 @@ class GameControl:
                 f"Routes it may try, in order: {', '.join(routes)}. It installs the next one without "
                 f"asking again, and stops after those or when you press stop.",
                 "go ahead", "cancel"):
+            return
+        if self.busy or self.game is not g:
             return
         self._autopilot_run(g, opt, routes)
 
@@ -1378,6 +1384,8 @@ class GameControl:
             return
         if not self.shell.ask("uninstall", f"Remove everything this tool put in {g.name}? The game's own "
                                            f"files are restored.", "uninstall", "keep", danger=True):
+            return
+        if self.busy or self.game is not g:
             return
         self.busy, self.action = True, "uninstalling"
         self.job_game = g
@@ -1572,11 +1580,13 @@ class GameControl:
         files the person downloaded, identified, copied into the tool's own
         folder, and chosen for the next install."""
         from tkinter import filedialog
+        if self.busy:
+            return
         ps = filedialog.askopenfilenames(
             title="select the frame generation files you downloaded (version.dll, and dlssg_sm86.ini "
                   "for dlssg_for_sm86)", parent=self.root,
             filetypes=[("dll and ini", "*.dll *.ini"), ("all files", "*.*")])
-        if not ps:
+        if not ps or self.busy:
             return
         try:
             key, files = ownfg.identify([Path(p) for p in ps])
@@ -1617,7 +1627,13 @@ class GameControl:
                               f"them installed loses them on its next install or uninstall.",
                               ok="forget", danger=True):
             return
-        ownfg.forget(key)
+        if self.busy:
+            return
+        try:
+            ownfg.forget(key)
+        except (OSError, ownfg.OwnFgError) as e:
+            self.write(f"[fail] could not forget the frame generation files ({e})", "err")
+            return
         if isinstance(getattr(self, "entry", None), dict):
             self.entry["own_fg"] = [k for k in (self.entry.get("own_fg") or []) if k != key]
         self.settings["own_fg"] = ""
@@ -2124,21 +2140,18 @@ class GameControl:
 
     def apply_tune(self) -> None:
         sug, g = self._tune, self.game
-        if sug is None or g is None:
+        if self.busy or sug is None or g is None:
             return
-        d, route = g.install_dir, self.route or ""
-        self.settings["workres"] = sug.resolution
+        route = self.route or ""
+        self.busy = True
         try:
-            if route == dlss.OPTI:
-                optiscaler.enable_nr(d, log=lambda t: self.write(t),
-                                     settings={"WorkingScale": round(sug.resolution / 100.0, 3)})
-            else:
-                feedcfg.write(d, {"work_resolution": sug.resolution})
-                self.write(f"      dlss5-feed.cfg: work_resolution={sug.resolution}%")
+            installer.apply_tune(g, route, sug.resolution, on_log=self.write)
         except Exception as e:
-            self.write(f"[fail] could not write the setting ({e}) - press install instead, it writes the "
-                       f"same value.", "err")
+            self.write(f"[fail] could not apply the setting ({e}); the suggestion is kept.", "err")
             return
+        finally:
+            self.busy = False
+        self.settings["workres"] = sug.resolution
         self.write(f"> set to {sug.resolution}%. It is read when the game starts, so it applies to the next run "
                    f"- play again and press 'did it work?' to see where it landed.", "ok")
         self._tune = None
@@ -2205,9 +2218,10 @@ class GameControl:
                                       + (" (Windows recorded a crash)" if said_by == "crash"
                                          else " (your answer)"))
         if not self.shell.ask("share the result",
-                              "A browser window opens with the result in it - nothing is sent unless you post "
-                              f"it. It carries the game's name and executable, the route and build, the graphics "
-                              f"api, {carried}. No paths, no user name, nothing else.",
+                              "Opening shares these prefilled details with GitHub in the URL; the issue is "
+                              "published only when you submit it. "
+                              f"It carries the game's name and executable, the route and build, the graphics "
+                              f"api, {carried}. Common local paths and credentials are redacted; review the text.",
                               "open it", "cancel"):
             return
         try:

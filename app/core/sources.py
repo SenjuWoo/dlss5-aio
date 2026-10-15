@@ -21,7 +21,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-UA = {"User-Agent": "dlss5-aio/2.0.0 (+local install helper)"}
+UA = {"User-Agent": "dlss5-aio/2.0.1 (+local install helper)"}
 
 RESHADE_HOME = "https://reshade.me"
 RESHADE_SETUP_RE = re.compile(r"/downloads/ReShade_Setup_([\d.]+)_Addon\.exe")
@@ -204,10 +204,13 @@ def _page(url: str, timeout: int = 30) -> str:
     """One HTML page, or "" - a fallback never raises on its way to failing."""
     try:
         from . import net
+        net._https_url(url)
         req = urllib.request.Request(url, headers=UA)
         with urllib.request.urlopen(req, timeout=timeout,
                                     context=net.ssl_context()) as r:
-            return r.read().decode("utf8", "replace")
+            if callable(getattr(r, "geturl", None)):
+                net._https_url(r.geturl())
+            return net.read_bounded(r).decode("utf8", "replace")
     except Exception:
         return ""
 
@@ -336,6 +339,8 @@ def _get(url: str, timeout: int = 60, attempts: int = 3) -> bytes:
     A timeout, a dropped connection or a 5xx is retried with a pause; any
     other HTTP error is the answer and is raised as it is.
     """
+    from . import net
+    net._https_url(url)
     req = urllib.request.Request(url, headers=UA)
     last: Exception | None = None
     for attempt in range(attempts):
@@ -343,7 +348,9 @@ def _get(url: str, timeout: int = 60, attempts: int = 3) -> bytes:
             from . import net           # net imports this module
             with urllib.request.urlopen(req, timeout=timeout,
                                         context=net.ssl_context()) as r:
-                return r.read()
+                if callable(getattr(r, "geturl", None)):
+                    net._https_url(r.geturl())
+                return net.read_bounded(r)
         except urllib.error.HTTPError as e:
             if e.code in (403, 429) and urllib.parse.urlsplit(url).hostname == "api.github.com":
                 raise RateLimited(

@@ -25,7 +25,9 @@ from __future__ import annotations
 
 import shutil
 import tarfile
+import tempfile
 from pathlib import Path
+from pathlib import PurePosixPath
 
 from . import net
 
@@ -119,17 +121,22 @@ def resolve() -> tuple[str, str]:
     raise RuntimeError("Could not find a DXVK release archive.")
 
 
-def _extract(tgz: Path, member_suffix: str, dest: Path) -> None:
+def _extract(tgz: Path, member_suffix: str, dest: Path, writer=None) -> None:
+    from . import installer
     with tarfile.open(tgz, "r:gz") as t:
-        hit = next((m for m in t.getmembers()
-                    if m.isfile() and m.name.lower().endswith(member_suffix.lower())),
-                   None)
-        if hit is None:
+        suffix = tuple(PurePosixPath(member_suffix.lower()).parts)
+        hits = [m for m in t.getmembers() if m.isfile()
+                and tuple(PurePosixPath(m.name.lower()).parts[-len(suffix):]) == suffix]
+        if len(hits) != 1 or hits[0].size > 256 * 1024 * 1024:
             raise RuntimeError(f"{tgz.name} does not contain {member_suffix}.")
-        src = t.extractfile(hit)
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        with src, open(dest, "wb") as out:
-            shutil.copyfileobj(src, out, 1 << 20)
+        # A broken archive never truncates the destination or bypasses the journal.
+        with tempfile.TemporaryDirectory(dir=net.cache_dir()) as folder:
+            staged = Path(folder) / dest.name
+            with t.extractfile(hits[0]) as src, staged.open("wb") as out:
+                shutil.copyfileobj(src, out, 1 << 20)
+            if staged.stat().st_size != hits[0].size:
+                raise OSError("DXVK extraction was incomplete")
+            (writer or installer._atomic_copy)(staged, dest)
 
 
 def is_dxvk(path: Path) -> bool:
@@ -149,7 +156,7 @@ def is_dxvk(path: Path) -> bool:
         return False
 
 
-def install(exe_dir: Path, x64: bool, log=None, api: str = "DX11") -> tuple[str, list[str]]:
+def install(exe_dir: Path, x64: bool, log=None, api: str = "DX11", writer=None) -> tuple[str, list[str]]:
     """Put DXVK beside the game. Returns (version, files written).
 
     Anything already sitting under one of DXVK's names - an ENB, a game's own
@@ -158,6 +165,9 @@ def install(exe_dir: Path, x64: bool, log=None, api: str = "DX11") -> tuple[str,
     own file" and leave the game on DXVK after removal.
     """
     log = log or (lambda *_: None)
+    from . import installer
+    report = installer.Report()
+    writer = writer or (lambda src, dst: installer._copy(src, dst, report, exe_dir))
     ver, url = resolve()
     log(f"      DXVK {ver}")
     tgz = net.download(url, f"dxvk-{ver}.tar.gz")
@@ -168,19 +178,11 @@ def install(exe_dir: Path, x64: bool, log=None, api: str = "DX11") -> tuple[str,
     pre = f"{sub}/" if sub else ""
     for name in names:
         dest = exe_dir / pre / name if sub else exe_dir / name
-        bak = dest.with_name(name + BACKUP_SUFFIX)
-        if dest.is_file() and not bak.exists() and not is_dxvk(dest):
-            try:
-                shutil.copy2(dest, bak)
-                written.append(pre + bak.name)
-                log(f"      kept your existing {pre}{name} as {bak.name}")
-            except OSError:
-                log(f"      WARNING: could not back up the existing {pre}{name}")
-        _extract(tgz, f"{arch}/{name}", dest)
+        _extract(tgz, f"{arch}/{name}", dest, writer=writer)
         written.append(pre + name)
     if sub:
         log(f"      into {sub}\\ - a Source engine game loads its d3d9.dll "
             f"from there ({SOURCE_RENDERER}), never from beside the exe")
     log(f"      {', '.join(names)} ({arch} build) - the game now renders "
         f"through Vulkan; ReShade loads as a Vulkan layer, nothing hooks the game")
-    return ver, written
+    return ver, list(dict.fromkeys(report.written + written))

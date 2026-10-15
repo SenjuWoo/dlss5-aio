@@ -318,6 +318,11 @@ class Report:
     # None when the step did not run - _write_manifest then carries the
     # earlier record forward, so a failed install never loses one.
     gpu_pref: list | None = None
+    game_root: Path | None = None
+    sidelined_hashes: dict = field(default_factory=dict)
+    hashes: dict = field(default_factory=dict)
+    checkpoint: object | None = None
+    layer_pending: bool = False
 
 
 # ---------------------------------------------------------------- reliability
@@ -604,6 +609,94 @@ def check_supported(g: games.Game) -> tuple[bool, str]:
     return True, ""
 
 
+def _entry_key(value) -> str:
+    return str(value).replace("\\", "/").lower()
+
+
+def _record_hash(data: dict, rel, field: str = "hashes") -> str:
+    rows = data.get(field)
+    if not isinstance(rows, dict):
+        return ""
+    return next((v for k, v in rows.items() if _entry_key(k) == _entry_key(rel)
+                 and isinstance(v, str) and len(v) == 64), "")
+
+
+def _safe_target(root: Path, dst: Path, game_root=None) -> Path:
+    """Check the actual destination, including existing directory junctions."""
+    for base in (root, game_root):
+        if base is None:
+            continue
+        try:
+            net.inside(base, str(dst.absolute()), absolute_ok=True)
+            return dst
+        except net.OutsideError:
+            pass
+    raise net.OutsideError(f"{dst} points outside the game folder - refused.")
+
+
+def _atomic_copy(src: Path, dst: Path) -> None:
+    """A failed or short copy must leave the previous destination whole."""
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    destination_before = net.sha256(dst) if dst.exists() else None
+    fd, name = tempfile.mkstemp(prefix=dst.name + ".", suffix=".aio-part", dir=dst.parent)
+    os.close(fd)
+    part = Path(name)
+    try:
+        before = net.sha256(src)
+        shutil.copyfile(src, part)
+        if net.sha256(part) != before or net.sha256(src) != before:
+            raise OSError(f"the copy of {src.name} failed byte verification")
+        with part.open("r+b") as handle:
+            os.fsync(handle.fileno())
+        destination_now = net.sha256(dst) if dst.exists() else None
+        if destination_now != destination_before:
+            raise OSError(f"{dst.name} changed while its replacement was being staged; nothing was replaced")
+        os.replace(part, dst)
+    finally:
+        try:
+            part.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _displace(path: Path) -> Path:
+    """Keep later personal bytes under an unused name before replacement."""
+    for number in range(10000):
+        candidate = path.with_name(path.name + ".dlss5-aio-displaced" + (f".{number}" if number else ""))
+        if not candidate.exists():
+            _atomic_copy(path, candidate)
+            return candidate
+    raise OSError(f"Too many preserved copies of {path.name}; nothing was replaced.")
+
+
+def _rel_file(root: Path, path: Path) -> str:
+    try:
+        return str(path.relative_to(root))
+    except ValueError:
+        return str(path.absolute())
+
+
+def _checkpoint(rep: Report) -> None:
+    if rep.checkpoint is not None and not rep.checkpoint():
+        raise OSError("The recovery record could not be saved; no further files were replaced.")
+
+
+def _prepare_write(dst: Path, rep: Report, root: Path) -> None:
+    _backup(dst, rep, root)
+    rel = _rel_file(root, dst)
+    if rel not in rep.written:
+        rep.written.append(rel)
+    _checkpoint(rep)
+
+
+def _wrote(dst: Path, rep: Report, root: Path) -> None:
+    rel = _rel_file(root, dst)
+    if rel not in rep.written:
+        rep.written.append(rel)
+    rep.hashes[rel] = net.sha256(dst)
+    _checkpoint(rep)
+
+
 def _backup(dst: Path, rep: Report, root: Path) -> None:
     """Preserve the game's own file before overwriting it.
 
@@ -616,9 +709,11 @@ def _backup(dst: Path, rep: Report, root: Path) -> None:
     dxgi.dll, the add-ons and a 165 MB nvngx_dlssnr.dll all put back. That is
     the "uninstall does not remove everything" people were seeing.
     """
+    _safe_target(root, dst, rep.game_root)
     if not dst.is_file():
         return
     bak = dst.with_name(dst.name + BACKUP_SUFFIX)
+    _safe_target(root, bak, rep.game_root)
     try:
         rel = str(bak.relative_to(root))
     except ValueError:
@@ -630,8 +725,32 @@ def _backup(dst: Path, rep: Report, root: Path) -> None:
         # asked only relative, a file of ours there was backed up as if it
         # were the game's own.
         key = str(dst)
+    # Repeated config merges in this install must not back up our own intermediate output.
+    current_digest = _record_hash({"hashes": rep.hashes}, key)
+    if current_digest and _entry_key(key) in {_entry_key(value) for value in rep.written}:
+        original_digest = _record_hash({"hashes": rep.hashes}, rel)
+        if original_digest and not bak.is_file():
+            raise OSError(f"The original backup of {dst.name} is missing; no replacement was made.")
+        if bak.is_file() and original_digest and net.sha256(bak) != original_digest:
+            raise OSError(f"The original backup of {dst.name} changed; no replacement was made.")
+        if net.sha256(dst) != current_digest:
+            kept = _displace(dst)
+            rep.notes.append(f"kept changed {dst.name} as {kept.name}")
+        if bak.is_file() and rel not in rep.written:
+            rep.written.append(rel)
+        return
     try:
-        if key.replace("\\", "/") in rep.preinstalled:
+        if _entry_key(key) in {_entry_key(value) for value in rep.preinstalled}:
+            previous = _previous_manifest(root) or {}
+            digest = _record_hash(previous, key)
+            backup_digest = _record_hash(previous, rel)
+            if backup_digest and not bak.is_file():
+                raise OSError(f"The original backup of {dst.name} is missing; no replacement was made.")
+            if bak.is_file() and backup_digest and net.sha256(bak) != backup_digest:
+                raise OSError(f"The original backup of {dst.name} changed; no replacement was made.")
+            if not digest or net.sha256(dst) != digest:
+                kept = _displace(dst)
+                rep.notes.append(f"kept changed or legacy {dst.name} as {kept.name}")
             # Ours from last time, so not backed up again - but the game's
             # original may already sit beside it from the FIRST install, and
             # the new record has to carry it. Returning without that dropped
@@ -648,6 +767,7 @@ def _backup(dst: Path, rep: Report, root: Path) -> None:
     # it so this manifest can restore it, instead of orphaning a 50+ MB file.
     for old_s in LEGACY_BACKUP_SUFFIXES:
         legacy = dst.with_name(dst.name + old_s)
+        _safe_target(root, legacy, rep.game_root)
         if legacy.is_file() and not bak.exists():
             try:
                 legacy.rename(bak)
@@ -655,6 +775,10 @@ def _backup(dst: Path, rep: Report, root: Path) -> None:
             except OSError:
                 pass
     if bak.exists():
+        _safe_target(root, bak, rep.game_root)
+        if net.sha256(dst) != net.sha256(bak):
+            kept = _displace(dst)
+            rep.notes.append(f"kept current {dst.name} as {kept.name} beside its earlier original backup")
         # Already backed up by an earlier install. Do NOT copy again - that
         # would overwrite the game's original with our own file. But the entry
         # must still go into this manifest, otherwise a later uninstall reads
@@ -663,12 +787,13 @@ def _backup(dst: Path, rep: Report, root: Path) -> None:
             rep.written.append(rel)
             rep.notes.append(f"existing backup of {dst.name} kept")
         return
-    try:
-        shutil.copy2(dst, bak)
+    _safe_target(root, bak, rep.game_root)
+    rep.hashes[rel] = net.sha256(dst)
+    if rel not in rep.written:
         rep.written.append(rel)
-        rep.notes.append(f"backed up the game's own {dst.name}")
-    except OSError:
-        pass
+    _checkpoint(rep)
+    _atomic_copy(dst, bak)
+    rep.notes.append(f"backed up the game's own {dst.name}")
 
 
 def _overlay_key_pref() -> int:
@@ -976,7 +1101,7 @@ def _roll_back(g, root: Path, rep: "Report", fresh: bool, log,
     of route). That one is gone either way, and "the game runs as it did
     before" would be untrue: it is said instead (gate 2.0.6).
     """
-    wrote = bool(rep.written or rep.sidelined or rep.remix
+    wrote = bool(rep.written or rep.sidelined or rep.remix or rep.layer_pending
                  or getattr(g, "emu", None) is not None)
     kept = ("What was written so far is recorded, so 'uninstall' can take it "
             "back out.")
@@ -1073,6 +1198,23 @@ def _finish_record(recorded: bool, rep: "Report", log) -> None:
             + NO_RECORD_HEAD[0].lower() + NO_RECORD_HEAD[1:] + _no_record_text(rep))
     log(f"      !! {text}")
     rep.warnings.append(text)
+
+
+def _verify_written(root: Path, rep: Report, log) -> None:
+    """A vanished payload is an incomplete install, whatever removed it."""
+    missing = [rel for rel in dict.fromkeys(rep.written)
+               if not rel.endswith((BACKUP_SUFFIX,) + LEGACY_BACKUP_SUFFIXES)
+               and not (root / rel).is_file()]
+    if not missing:
+        return
+    names = ", ".join(missing[:4]) + ("..." if len(missing) > 4 else "")
+    text = (f"Installation is incomplete: {len(missing)} written file(s) are missing: {names}. "
+            "Inspect the application log, file permissions and any antivirus quarantine records before retrying. "
+            "The remaining recovery record was kept for uninstall.")
+    rep.warnings.append(text)
+    log(text)
+    _checkpoint(rep)
+    raise InstallError(text)
 
 
 def record_lost(rep) -> bool:
@@ -1234,20 +1376,8 @@ def _place_entry(e: dict, dest: Path, rep, root: Path, dl, member: str,
                 f"That file was not written and the download was thrown "
                 f"away. Try again - it is fetched fresh - or pick another "
                 f"build.")
-    _backup(dest, rep, root)
     if raw:
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        # All or nothing: a copy interrupted half way through would leave a
-        # truncated runtime where the game expects a whole one.
-        part = dest.with_name(dest.name + ".part")
-        try:
-            shutil.copyfile(got, part)
-            os.replace(part, dest)
-        finally:
-            try:
-                part.unlink(missing_ok=True)
-            except OSError:
-                pass
+        _copy(got, dest, rep, root)
     else:
         _extract(got, member, dest, rep, root)
     try:
@@ -1262,19 +1392,142 @@ def _place_entry(e: dict, dest: Path, rep, root: Path, dl, member: str,
 
 def _extract(zpath: Path, member: str, dst: Path, rep: Report, root: Path) -> None:
     """Extract one member, preserving anything already at the destination."""
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    _backup(dst, rep, root)
-    net.extract_one(zpath, member, dst)
+    with tempfile.TemporaryDirectory(prefix="aio-extract-") as tmp:
+        source = Path(tmp) / dst.name
+        net.extract_one(zpath, member, source)
+        _copy(source, dst, rep, root)
 
 
 def _copy(src: Path, dst: Path, rep: Report, root: Path) -> None:
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    _backup(dst, rep, root)          # never overwrite anything unrecoverably
-    shutil.copyfile(src, dst)
-    try:
-        rep.written.append(str(dst.relative_to(root)))
-    except ValueError:
-        rep.written.append(str(dst))
+    before = net.sha256(dst) if dst.exists() else None
+    _prepare_write(dst, rep, root)
+    rep.hashes[_rel_file(root, dst)] = net.sha256(src)
+    _checkpoint(rep)
+    if (net.sha256(dst) if dst.exists() else None) != before:
+        raise OSError(f"{dst.name} changed while its original was being preserved; nothing was replaced")
+    _atomic_copy(src, dst)
+    _wrote(dst, rep, root)
+
+
+def _remove_for_install(dst: Path, rep: Report, root: Path) -> None:
+    """Retire a conflicting file without losing later edits or its original."""
+    before = net.sha256(dst)
+    _backup(dst, rep, root)
+    _checkpoint(rep)
+    if net.sha256(dst) != before:
+        raise OSError(f"{dst.name} changed while it was being preserved; it was kept")
+    dst.unlink()
+    key = _entry_key(_rel_file(root, dst))
+    rep.written = [rel for rel in rep.written if _entry_key(rel) != key]
+    rep.preinstalled = {rel for rel in rep.preinstalled if _entry_key(rel) != key}
+    _checkpoint(rep)
+
+
+def _forget_restored(rel: str, rep: Report) -> None:
+    """A restored original must stop being owned by this installation."""
+    key = _entry_key(rel)
+    rep.preinstalled = {value for value in rep.preinstalled if _entry_key(value) != key}
+    rep.written = [value for value in rep.written if _entry_key(value) != key]
+    rep.hashes = {name: digest for name, digest in rep.hashes.items() if _entry_key(name) != key}
+
+
+def _write_bytes(content: bytes, dst: Path, rep: Report, root: Path) -> None:
+    with tempfile.TemporaryDirectory(prefix="aio-content-") as tmp:
+        source = Path(tmp) / dst.name
+        source.write_bytes(content)
+        _copy(source, dst, rep, root)
+
+
+def _remix_option(conf: Path, key: str, rep: Report, root: Path) -> None:
+    """Keep the exact old key lines in the journal before changing the config."""
+    _safe_target(root, conf, rep.game_root)
+    content = conf.read_bytes() if conf.is_file() else b""
+    matching = [line for line in content.splitlines(keepends=True) if remix._line_re(key).match(line)]
+    previous = (_previous_manifest(root) or {}).get("remix")
+    if (isinstance(previous, dict) and previous.get("key") == key
+            and _entry_key(previous.get("conf")) == _entry_key(rep.remix.get("conf"))
+            and isinstance(previous.get("original_lines"), list) and matching
+            and all(line.rstrip(b"\r\n") == f"{key} = True".encode("ascii") for line in matching)):
+        # A reinstall must keep the first original, not our own enabled value.
+        for field in ("original_lines", "conf_before_sha256", "conf_final_newline"):
+            rep.remix[field] = previous.get(field)
+    else:
+        rep.remix["original_lines"] = [line.decode("latin1") for line in matching]
+        rep.remix["conf_before_sha256"] = net.sha256(conf) if conf.is_file() else ""
+    _checkpoint(rep)
+    with tempfile.TemporaryDirectory(prefix="aio-remix-") as tmp:
+        staged = Path(tmp) / conf.name
+        staged.write_bytes(content)
+        if not remix.set_option(staged, key, "True"):
+            raise OSError(f"Could not prepare {conf.name}")
+        if (conf.read_bytes() if conf.is_file() else b"") != content:
+            raise OSError(f"{conf.name} changed while its option was being prepared")
+        _atomic_copy(staged, conf)
+
+
+def _restore_remix(conf: Path, record: dict) -> bool:
+    """Restore only our unchanged key, leaving later user settings in place."""
+    key = record.get("key")
+    originals = record.get("original_lines")
+    if key not in {value + ".enable" for value in remix.PREFIX.values()} or not isinstance(originals, list) or not all(isinstance(line, str) for line in originals):
+        raise OSError("the recorded Remix key's previous value cannot be verified")
+    if not conf.is_file():
+        return False
+    content = conf.read_bytes()
+    pattern = remix._line_re(key)
+    lines = content.splitlines(keepends=True)
+    matching = [line for line in lines if pattern.match(line)]
+    expected = f"{key} = True".encode("ascii")
+    if not matching or any(line.rstrip(b"\r\n") != expected for line in matching):
+        return False
+    output = []
+    inserted = False
+    for line in lines:
+        if pattern.match(line):
+            if not inserted:
+                output.extend(value.encode("latin1") for value in originals)
+                inserted = True
+        else:
+            output.append(line)
+    result = b"".join(output)
+    if not record.get("conf_final_newline", True):
+        import hashlib
+        trimmed = result.rstrip(b"\r\n")
+        if hashlib.sha256(trimmed).hexdigest() == record.get("conf_before_sha256"):
+            result = trimmed
+    with tempfile.TemporaryDirectory(prefix="aio-remix-") as tmp:
+        staged = Path(tmp) / conf.name
+        staged.write_bytes(result)
+        if conf.read_bytes() != content:
+            raise OSError(f"{conf.name} changed while its original option was being restored")
+        _atomic_copy(staged, conf)
+    return True
+
+
+def _configure(root: Path, rep: Report, function, *args, names=("ReShade.ini", "ReShadePreset.ini"), record_root=None, **kwargs):
+    """Merge configuration in isolation, then commit each complete result."""
+    with tempfile.TemporaryDirectory(prefix="aio-config-") as tmp:
+        staged = Path(tmp)
+        originals = {}
+        for name in names:
+            target = _safe_target(root, root / name, rep.game_root)
+            if target.is_file():
+                _atomic_copy(target, staged / name)
+                originals[name] = net.sha256(staged / name)
+            else:
+                originals[name] = None
+        result = function(staged, *args, **kwargs)
+        if result is False:
+            return False
+        for name in names:
+            target = _safe_target(root, root / name, rep.game_root)
+            if (net.sha256(target) if target.is_file() else None) != originals[name]:
+                raise OSError(f"{name} changed while its configuration was being prepared; it was kept")
+        for name in names:
+            source = staged / name
+            if source.is_file() and (not (root / name).is_file() or net.sha256(source) != net.sha256(root / name)):
+                _copy(source, root / name, rep, record_root or root)
+        return result
 
 
 # ---------------------------------------------------------------- plan
@@ -1302,23 +1555,25 @@ def _place_own_fg(root: Path, opt: Options, rep: "Report", log, begin) -> None:
     """The OptiScaler route's last files: the person's own frame generation
     files when they added some, and an earlier set taken out when not."""
     man = _previous_manifest(root) or {}
-    for gone in ownfg.remove_leftovers(root, man, opt.own_fg, log):
-        rep.preinstalled.discard(gone)
-        rep.preinstalled.discard(gone.replace("\\", "/"))
+    restored = ownfg.remove_leftovers(root, man, opt.own_fg, log)
+    for gone in restored:
+        _forget_restored(gone, rep)
+    if restored:
+        _checkpoint(rep)
     if not opt.own_fg:
         return
     recipe = ownfg.RECIPES[opt.own_fg]
     begin(f"frame generation files ({recipe.label.split(' (')[0]})")
-    have = ownfg.stored(opt.own_fg)
-    if have:
-        for dst, src in have.items():
-            _copy(src, root / dst, rep, root)
-            log(f"      {dst} (your file)")
-    else:
-        # Checked at the top of install(): the store is gone, and last
-        # time's copies are still in place - they stay, and stay recorded.
-        log(f"      {', '.join(ownfg.dests(opt.own_fg))} kept from the last install "
-            f"(the copies in the tool's folder are gone)")
+    with prefs.mutation_lock():
+        have = ownfg.stored(opt.own_fg)
+        if have:
+            for dst, src in have.items():
+                _copy(src, root / dst, rep, root)
+                log(f"      {dst} (your file)")
+        else:
+            # The store is gone, so the previous installed recipe stays recorded.
+            log(f"      {', '.join(ownfg.dests(opt.own_fg))} kept from the last install "
+                f"(the copies in the tool's folder are gone)")
     rep.components["own_fg"] = opt.own_fg
     rep.warnings.append(f"frame generation files ({recipe.label}): {ownfg.UNTRIED}")
     rep.notes.append(f"frame generation: {recipe.label}, from files you downloaded; "
@@ -2173,7 +2428,7 @@ def _install_feeder_parts(g, opt, root: Path, host: Path, x64: bool,
         dest = root / SHADERS / h
         dest.parent.mkdir(parents=True, exist_ok=True)
         _backup(dest, rep, root)
-        dest.write_bytes(net.fetch_text(sources.RESHADE_HEADERS_BASE + h))
+        _write_bytes(net.fetch_text(sources.RESHADE_HEADERS_BASE + h), dest, rep, root)
         rep.written.append(str(Path(SHADERS) / h))
     log(f"      {', '.join(sources.RESHADE_HEADERS)}")
 
@@ -2229,11 +2484,11 @@ def _install_feeder_parts(g, opt, root: Path, host: Path, x64: bool,
         z = dl(sources.LUMENITE_ZIP, "LumeniteFX-mainline.zip")
         want_fx = LUMENITE_PROVIDER_FX.get(opt.provider, "lumenite_Kernel.fx")
         w = net.extract_tree(z, "Shaders", str(SHADERS), root, only_ext=(".fx",),
-                             only_names=(want_fx,))
+                             only_names=(want_fx,), writer=lambda src, dst: _copy(src, dst, rep, root))
         w += net.extract_tree(z, "Shaders/include", str(INCLUDE), root,
-                              only_ext=(".fxh",))
+                              only_ext=(".fxh",), writer=lambda src, dst: _copy(src, dst, rep, root))
         w += net.extract_tree(z, "Textures", str(TEXTURES), root,
-                              only_ext=(".png",))
+                              only_ext=(".png",), writer=lambda src, dst: _copy(src, dst, rep, root))
         # Effects an earlier install of ours dropped in are taken back out:
         # they were compiling for nothing.
         for old in sorted((root / SHADERS).glob("lumenite_*.fx")):
@@ -2241,7 +2496,7 @@ def _install_feeder_parts(g, opt, root: Path, host: Path, x64: bool,
             if old.name.lower() != want_fx.lower() and rel_old.replace("\\", "/") in {
                     p.replace("\\", "/") for p in rep.preinstalled}:
                 try:
-                    old.unlink()
+                    _remove_for_install(old, rep, root)
                     rep.notes.append(f"removed {old.name} - an effect the feed does "
                                      f"not use, left by an earlier install")
                 except OSError:
@@ -2275,7 +2530,7 @@ def _install_vort(root: Path, rep: "Report", dl, log, begin) -> None:
     _extract(z, "Shaders/" + VORT_FX, root / SHADERS / VORT_FX, rep, root)
     rep.written.append(str(SHADERS / VORT_FX))
     w = net.extract_tree(z, "Shaders/Includes", str(VORT_INCLUDE),
-                         root, only_ext=(".fxh",))
+                         root, only_ext=(".fxh",), writer=lambda src, dst: _copy(src, dst, rep, root))
     for p_ in w:
         rep.written.append(str(p_.relative_to(root)))
     _extract(z, "Textures/" + VORT_TEXTURE,
@@ -2338,7 +2593,9 @@ def _previous_manifest(root: Path) -> dict | None:
         if not p.is_file():
             continue
         try:
-            return json.loads(p.read_text(encoding="utf8"))
+            data = json.loads(p.read_text(encoding="utf8"))
+            if isinstance(data, dict):
+                return data
         except (OSError, json.JSONDecodeError):
             continue
     return None
@@ -2428,20 +2685,11 @@ def _clear_stale_reshade(root: Path, keep: str, rep: Report, log) -> None:
         if name.lower() == "d3d9.dll" and remix.is_remix_game(root):
             continue
         try:
-            if name in rep.preinstalled:
-                aside = p.with_name(name + ORPHAN_SUFFIX)
-                if aside.exists():
-                    p.unlink()
-                else:
-                    p.rename(aside)
-                    rep.written.append(aside.name)
-            else:
-                _backup(p, rep, root)
-                p.unlink()
+            _remove_for_install(p, rep, root)
         except OSError as e:
             log(f"      could not move {name} aside ({e}) - if the game will "
                 f"not start, remove it by hand")
-            continue
+            raise InstallError(f"Could not safely move the conflicting {name} aside ({e}); the install stopped and recovery entries were kept.") from e
         rep.notes.append(f"moved aside a second ReShade copy: {name}")
         log(f"      moved {name} out of the way - a second ReShade under "
             f"another name would stop the game from starting")
@@ -2465,29 +2713,15 @@ def _purge_foreign_addons(root: Path, keep: str, rep: Report, log) -> None:
             p = root / name
             if not p.is_file():
                 continue
-            ours = name in rep.preinstalled
             try:
-                if ours:
-                    # Ours, from an install we recorded: just take it away.
-                    # A backup would make uninstall restore the conflict.
-                    aside = p.with_name(p.name + ORPHAN_SUFFIX)
-                    if aside.exists():
-                        p.unlink()
-                    else:
-                        p.rename(aside)
-                        rep.written.append(aside.name)
-                else:
-                    # Might be the user's own build. Preserve it the normal
-                    # way so uninstall puts it back, then move it out of
-                    # ReShade's reach for now.
-                    _backup(p, rep, root)
-                    p.unlink()
+                _remove_for_install(p, rep, root)
                 rep.notes.append(f"moved aside an orphaned {route} add-on: {name}")
                 log(f"      moved {name} out of the way - it is a {route} "
                     f"add-on and ReShade would load it alongside this one")
-            except OSError:
+            except OSError as error:
                 log(f"      WARNING: {name} belongs to the {route} route and "
                     f"could not be moved; the two will conflict")
+                raise InstallError(f"Could not safely move the conflicting {name} aside ({error}); the install stopped and recovery entries were kept.") from error
 
 
 def _write_manifest(root: Path, g: games.Game, opt: Options, rep: Report,
@@ -2515,12 +2749,36 @@ def _write_manifest(root: Path, g: games.Game, opt: Options, rep: Report,
     # was orphaned and no uninstall could ever remove it.
     # Compared with one separator: _copy records "a\b", the old record
     # read back as "a/b", and the same file went into the record twice.
+    previous = _previous_manifest(root) or {}
+    old_sidelined = previous.get("sidelined") or []
+    old_sidelined_hashes = previous.get("sidelined_hashes") or {}
+    if not isinstance(old_sidelined, list) or not all(isinstance(name, str) for name in old_sidelined) or not isinstance(old_sidelined_hashes, dict):
+        raise InstallError("The previous recovery record has malformed sidelined originals; it was preserved.")
+    rep.sidelined = list(dict.fromkeys(old_sidelined + rep.sidelined))
+    rep.sidelined_hashes = dict(old_sidelined_hashes, **rep.sidelined_hashes)
+    if not rep.remix and isinstance(previous.get("remix"), dict):
+        rep.remix = dict(previous["remix"])
+    rep.written = list(dict.fromkeys(rep.written))
+    hashes = dict(rep.hashes)
+    for rel in rep.written:
+        if rel not in hashes:
+            digest = _record_hash(previous, rel)
+            if digest:
+                hashes[rel] = digest
+                rep.hashes[rel] = digest
     have = {w.replace("\\", "/") for w in rep.written}
     for rel in sorted(rep.preinstalled):
+        try:
+            _safe_target(root, root / rel, rep.game_root)
+        except net.OutsideError:
+            continue
         if rel.replace("\\", "/") in have:
             continue
         if (root / rel).exists():
             rep.written.append(rel)
+            digest = _record_hash(previous, rel)
+            if digest:
+                hashes[rel] = digest
     # And the game's original beside any file on the record: whichever path
     # skipped _backup this time (a file of ours from last time, a step not
     # taken), the backup an earlier install made stays on the record, so
@@ -2534,6 +2792,10 @@ def _write_manifest(root: Path, g: games.Game, opt: Options, rep: Report,
         if b.replace("\\", "/") not in have and (root / b).is_file():
             rep.written.append(b)
             have.add(b.replace("\\", "/"))
+            digest = _record_hash(previous, b)
+            if digest:
+                hashes[b] = digest
+                rep.hashes[b] = digest
     gpu_records = rep.gpu_pref
     if gpu_records is None:
         gpu_records = list((_previous_manifest(root) or {}).get("gpu_pref") or [])
@@ -2556,6 +2818,7 @@ def _write_manifest(root: Path, g: games.Game, opt: Options, rep: Report,
             "path": opt.path,
             "reliability": level,
             "files": rep.written,
+            "hashes": hashes,
             "skipped": rep.skipped,
             "notes": rep.notes,
             "warnings": rep.warnings,
@@ -2573,6 +2836,7 @@ def _write_manifest(root: Path, g: games.Game, opt: Options, rep: Report,
             "components": rep.components,
             "kind": g.kind,
             "sidelined": rep.sidelined,
+            "sidelined_hashes": rep.sidelined_hashes or previous.get("sidelined_hashes") or {},
             "remix": rep.remix,
             # which of the files above are the person's own frame generation
             # files: the diagnosis does not name them as another hook, and
@@ -2595,9 +2859,13 @@ def _write_atomic(path: Path, text: str) -> None:
     previous install's record - the list uninstall reads - and the note
     saying the drive was full was never written either.
     """
-    tmp = path.with_name(path.name + ".tmp")
+    fd, name = tempfile.mkstemp(prefix=path.name + ".", suffix=".aio-part", dir=path.parent)
+    tmp = Path(name)
     try:
-        tmp.write_text(text, encoding="utf8")
+        with os.fdopen(fd, "w", encoding="utf8", newline="") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
         # An antivirus or the indexer holding the old file for a moment
         # makes the replace fail; a moment later it goes through.
         for attempt in range(3):
@@ -2697,13 +2965,37 @@ def _gpu_pref_line(root: Path, g: games.Game, opt: Options) -> str:
             f"(--remove on the command line) takes it back out")
 
 
+def _gpu_records(root: Path, g: games.Game, records) -> list[dict]:
+    """A local recovery record can only restore this game's program settings."""
+    out = []
+    for row in records if isinstance(records, list) else ():
+        if not isinstance(row, dict) or not isinstance(row.get("exe"), str):
+            continue
+        path = Path(row["exe"])
+        if not path.is_absolute() or path.suffix.lower() != ".exe":
+            continue
+        try:
+            _safe_target(root, path, g.folder)
+        except net.OutsideError:
+            continue
+        out.append(row)
+    return out
+
+
 def _set_gpu_pref(root: Path, g: games.Game, opt: Options, rep: Report, log) -> None:
     """Apply - or take back, when the box is off - the graphics preference.
 
     Never stops an install: it is a convenience on top of files that are
     already in place."""
-    before = [r for r in (_previous_manifest(root) or {}).get("gpu_pref") or []
-              if isinstance(r, dict)]
+    before = _gpu_records(root, g, (_previous_manifest(root) or {}).get("gpu_pref"))
+
+    def remember(records):
+        rep.gpu_pref = list(records)
+        for row in before:
+            if not any(gpupref._same(row["exe"], item["exe"]) for item in rep.gpu_pref):
+                rep.gpu_pref.append(row)
+        _checkpoint(rep)
+
     try:
         if not opt.gpu_pref or not gpupref.hybrid():
             if gpupref.restore(before):
@@ -2711,7 +3003,10 @@ def _set_gpu_pref(root: Path, g: games.Game, opt: Options, rep: Report, log) -> 
             rep.gpu_pref = []
             return
         exes = _gpu_exes(root, g, opt)
-        records, theirs = gpupref.apply(exes, before)
+        for exe in exes:
+            _safe_target(root, exe, g.folder)
+        with prefs.mutation_lock():
+            records, theirs = gpupref.apply(exes, before, checkpoint=remember)
         # An exe from an earlier install that this one no longer targets (the
         # person picked another executable): still ours, still on the record.
         for r in before:
@@ -2733,7 +3028,7 @@ def _set_gpu_pref(root: Path, g: games.Game, opt: Options, rep: Report, log) -> 
                 f"card, not the {gpupref.other_gpu()} one. 'uninstall' takes it "
                 f"back out")
     except Exception as e:
-        log(f"      Windows graphics setting not changed ({e})")
+        log(f"      Windows graphics setting could not be fully applied ({e}); recovery entries were kept")
         rep.warnings.append(f"could not set the Windows graphics setting to High "
                             f"performance ({e}); set it by hand in Settings > System > "
                             f"Display > Graphics if the game runs on the other GPU")
@@ -2813,8 +3108,17 @@ def _sideline(root: Path, rep: Report, log) -> None:
             continue
         moved = f.with_name(f.name + SIDELINE_SUFFIX)
         try:
+            _safe_target(root, f, rep.game_root)
+            _safe_target(root, moved, rep.game_root)
+            digest = net.sha256(f)
+            rep.sidelined.append(f.name)
+            rep.sidelined_hashes[f.name] = net.sha256(moved) if moved.is_file() else digest
+            _checkpoint(rep)
             if moved.exists():
-                f.unlink()          # an earlier run already kept a copy
+                if net.sha256(moved) != digest:
+                    kept = _displace(f)
+                    rep.notes.append(f"kept changed {f.name} as {kept.name}")
+                f.unlink()
             else:
                 f.rename(moved)
         except OSError as e:
@@ -2822,7 +3126,6 @@ def _sideline(root: Path, rep: Report, log) -> None:
                                 f"if it is too old for the neural pass, "
                                 f"nothing will visibly happen in game")
             continue
-        rep.sidelined.append(f.name)
         rep.notes.append(f"{f.name} renamed to {moved.name}: the game's copy "
                          f"is older than Windows' and the neural pass will not "
                          f"compile against it; uninstall puts it back")
@@ -2830,31 +3133,39 @@ def _sideline(root: Path, rep: Report, log) -> None:
             f"is too old for the neural pass; Windows' own is used instead")
 
 
-def _restore_sidelined(root: Path, names, log) -> list[str]:
+def _restore_sidelined(root: Path, names, log, hashes=None, failed=None) -> list[str]:
     """Undo _sideline: the game's file goes back under its own name."""
     back: list[str] = []
-    cands = list(names or [])
-    try:
-        for f in root.iterdir():
-            if f.is_file() and f.name.lower().endswith(SIDELINE_SUFFIX):
-                n = f.name[:-len(SIDELINE_SUFFIX)]
-                if n not in cands:
-                    cands.append(n)
-    except OSError:
-        pass
+    cands = names if isinstance(names, list) else []
+    hashes = hashes if isinstance(hashes, dict) else {}
     for name in cands:
+        if not isinstance(name, str) or name.lower() not in SIDELINE:
+            log(f"ignored an invalid sidelined file: {name}")
+            continue
         moved = root / (name + SIDELINE_SUFFIX)
         orig = root / name
-        if not moved.is_file():
-            continue
         try:
+            _safe_target(root, moved)
+            _safe_target(root, orig)
+            digest = hashes.get(name)
+            if not moved.is_file():
+                if digest and orig.is_file() and net.sha256(orig) == digest:
+                    continue
+                raise OSError("its recorded original backup is missing; the recovery entry was kept")
+            if not digest or net.sha256(moved) != digest:
+                raise OSError("its original bytes cannot be verified; the moved file was kept")
             if orig.exists():
-                orig.unlink()
-            moved.rename(orig)
+                if net.sha256(orig) != digest:
+                    kept = _displace(orig)
+                    log(f"kept changed {name} as {kept.name}")
+            _atomic_copy(moved, orig)
+            moved.unlink()
             back.append(name)
             log(f"restored: {name} (the game's own file, moved aside)")
-        except OSError as e:
+        except (OSError, net.OutsideError) as e:
             log(f"could not restore: {name} ({e})")
+            if failed is not None:
+                failed.append(name + SIDELINE_SUFFIX)
     return back
 
 
@@ -2866,6 +3177,7 @@ def install(g: games.Game, opt: Options, on_step=None, on_prog=None, on_log=None
     # anything - and now that every component can fall back, it would be
     # repeated far more often.
     sources.last_fallback = None
+    _safe_target(g.folder, g.install_dir)
     # The detection walk is remembered per folder; writing into it makes
     # that memory wrong.
     dlss.forget_walk(g.folder)
@@ -2892,7 +3204,7 @@ def install(g: games.Game, opt: Options, on_step=None, on_prog=None, on_log=None
     prog = on_prog or (lambda *_: None)
 
     root = g.install_dir
-    rep = Report()
+    rep = Report(game_root=g.folder)
     x64 = g.bitness == 64
     if opt.path == FEEDER and g.api == "OpenGL" and opt.provider in (3, 4):
         # LumeniteFX reads 0% motion under OpenGL (perseval-BLR, six GL
@@ -2918,6 +3230,9 @@ def install(g: games.Game, opt: Options, on_step=None, on_prog=None, on_log=None
     level, why_rel = reliability(g, opt.path,
                                  "" if opt.native_dlss else opt.upscaler,
                                  remix_swap=swap)
+    rep.preinstalled = _previously_ours(root)
+    previous = _previous_route(root)
+    rep.checkpoint = lambda: _write_manifest(root, g, opt, rep, proxy, level, complete=False)
     if level != STABLE:
         rep.warnings.append(f"{level}: {why_rel}")
 
@@ -2970,47 +3285,12 @@ def install(g: games.Game, opt: Options, on_step=None, on_prog=None, on_log=None
         log("      !! RE Engine game detected - ReShade's add-on support is "
             "documented to crash this engine; see the warning above")
 
-    # Is another injector already in place?
+    # Refuse an occupied proxy before changing the previous working route.
     existing = root / proxy if proxy else root
-    if opt.path not in (OPTI, ROUTE_REMIX) and existing.is_file() \
-            and not _is_reshade(existing):
-        if optiscaler.is_optiscaler(existing):
-            # A hand-installed OptiScaler (no record of ours) under the name
-            # ReShade needs. Two injectors under one name cannot coexist, and
-            # refusing sends people to delete files by hand - so it is backed
-            # up (uninstall puts it back) and moved out of the way, with the
-            # other OptiScaler files it came with.
-            _backup(existing, rep, root)
-            existing.unlink()
-            for extra in (optiscaler.FORWARDER, optiscaler.INI):
-                p_ = root / extra
-                if p_.is_file():
-                    _backup(p_, rep, root)
-                    p_.unlink()
-            rep.notes.append(f"an OptiScaler installed by hand as {proxy} was "
-                             f"backed up and moved aside - two injectors "
-                             f"cannot share the name")
-            log(f"      {proxy} was OptiScaler (not installed by this tool) - "
-                f"backed up and moved aside")
-        else:
-            raise InstallError(
-                f"{proxy} already exists but is not ReShade (DXVK, Special K or "
-                f"another injector?). Remove it first, then try again.")
-
-    # Read before anything is written: what is here that we put here.
-    rep.preinstalled = _previously_ours(root)
-
-    # A ReShade left under ANOTHER name would be loaded as a second copy. It
-    # aborts itself ("Another ReShade instance was already loaded"), and the
-    # game may not start at all - MGS V did not. It happens when the name
-    # ReShade loads under is changed between installs, and when an uninstall
-    # that knew only the recorded name left the other one behind. Through
-    # DXVK or on a Vulkan game there must be none at all.
-    if opt.path != OPTI:
-        # On the Remix route there is no proxy to keep: every ReShade in the
-        # folder has to go, whatever name it is under.
-        _clear_stale_reshade(root, "" if opt.path == ROUTE_REMIX else proxy,
-                             rep, log)
+    move_hand_opti = (opt.path not in (OPTI, ROUTE_REMIX) and existing.is_file()
+                      and not _is_reshade(existing) and optiscaler.is_optiscaler(existing))
+    if opt.path not in (OPTI, ROUTE_REMIX) and existing.is_file() and not _is_reshade(existing) and not move_hand_opti:
+        raise InstallError(f"{proxy} already exists but is not ReShade (DXVK, Special K or another injector?). Remove it first, then try again.")
 
     # Switching routes must not leave the previous one behind. The routes put
     # very different things in the folder - the feeder alone drops 28 files,
@@ -3043,15 +3323,28 @@ def install(g: games.Game, opt: Options, on_step=None, on_prog=None, on_log=None
         if why_fg:
             raise InstallError(why_fg)
 
-    previous = _previous_route(root)
     # The route taken out below, named when a failure rolls this one back.
     switched = previous if previous and previous != opt.path else ""
     if previous and previous != opt.path:
         log(f"[0] removing the previous {previous} install first")
         for line in uninstall(g, on_log=lambda s: None):
             pass
+        if (root / MANIFEST).is_file():
+            raise InstallError("The previous install could not be fully restored. Its recovery record was kept; the new route was not installed.")
+        rep.written.clear()
+        rep.hashes.clear()
+        rep.preinstalled.clear()
         log(f"    the {previous} route was removed; installing {opt.path}")
         rep.notes.append(f"replaced a previous {previous} install")
+
+    # All destructive cleanup follows validation and the previous route's recovery.
+    if move_hand_opti and existing.is_file():
+        for target in (existing, root / optiscaler.FORWARDER, root / optiscaler.INI):
+            if target.is_file():
+                _remove_for_install(target, rep, root)
+        rep.notes.append(f"hand-installed OptiScaler under {proxy} was backed up and moved aside")
+    if opt.path != OPTI:
+        _clear_stale_reshade(root, "" if opt.path == ROUTE_REMIX else proxy, rep, log)
 
     # Belt and braces: whatever the manifest said, no add-on from another
     # route may be left in the folder. ReShade loads them all.
@@ -3101,7 +3394,7 @@ def install(g: games.Game, opt: Options, on_step=None, on_prog=None, on_log=None
     # (_roll_back). #438: the ReShade download died after DXVK's d3d9.dll
     # was in, and AC2 then ran on DXVK with nothing of ours on top of it -
     # "glitches in shaders", in a game that had worked before the install.
-    fresh = not _previously_ours(root)
+    fresh = not rep.preinstalled
     try:
         # --- 0) REFramework first, on an RE Engine game (see reengine.py) ---
         # Never on the remix route: Remix has already replaced the renderer
@@ -3110,7 +3403,7 @@ def install(g: games.Game, opt: Options, on_step=None, on_prog=None, on_log=None
         # reason.
         if opt.path != ROUTE_REMIX and reengine.detected(root):
             begin("REFramework (RE Engine - so ReShade survives)")
-            for f in refw.install(root, log):
+            for f in refw.install(root, log, writer=lambda src, dst: _copy(src, dst, rep, root)):
                 rep.written.append(f)
             rep.notes.append(
                 "REFramework installed: it loads before the game's own "
@@ -3124,7 +3417,8 @@ def install(g: games.Game, opt: Options, on_step=None, on_prog=None, on_log=None
         # GTA IV install; uses_dxvk() excludes that route for the same reason.
         if dxvk_from:
             begin(f"DXVK ({dxvk_from} -> Vulkan)")
-            ver, files = dxvk.install(root, x64, log, api=dxvk_from)
+            ver, files = dxvk.install(root, x64, log, api=dxvk_from,
+                                      writer=lambda src, dst: _copy(src, dst, rep, root))
             rep.written += files
             rep.components["dxvk"] = ver
             rep.notes.append(f"DXVK {ver} installed ({dxvk_from} -> Vulkan): the "
@@ -3181,22 +3475,19 @@ def install(g: games.Game, opt: Options, on_step=None, on_prog=None, on_log=None
                     aside = stale.with_name(rt0.name + SUPERSEDED_SUFFIX)
                     if stale.is_file():
                         try:
-                            os.replace(stale, aside)
+                            _safe_target(root, stale, rep.game_root)
+                            _safe_target(root, aside, rep.game_root)
+                            if aside.exists():
+                                aside = _displace(stale)
+                            else:
+                                _atomic_copy(stale, aside)
+                            stale.unlink()
                             rep.notes.append(
                                 f"{_rel(aside)} is the runtime this mod had "
                                 f"before it updated - delete it if you do not "
                                 f"need it")
-                        except OSError:
-                            # Left under the backup name, uninstall would
-                            # put the older runtime back over the mod's.
-                            try:
-                                stale.unlink()
-                            except OSError as e:
-                                rep.warnings.append(
-                                    f"{_rel(stale)} could not be moved aside "
-                                    f"({e}) - rename or delete it before "
-                                    f"uninstalling, or uninstall puts an older "
-                                    f"runtime back")
+                        except OSError as error:
+                            raise InstallError(f"Could not preserve the superseded Remix original ({error}); it was kept.") from error
                     log("      the mod has its own DLSS 5 runtime now - "
                         "left as it is")
                 else:
@@ -3218,15 +3509,16 @@ def install(g: games.Game, opt: Options, on_step=None, on_prog=None, on_log=None
                     # runtime itself: a mod whose own runtime has no pass
                     # ships no remix_nvngx.dll, so ours stays ours here.
                     old_bak = rt.with_name(rt.name + BACKUP_SUFFIX)
-                    tmp_bak = old_bak.with_name(old_bak.name + ".tmp")
                     try:
-                        shutil.copy2(rt, tmp_bak)
-                        os.replace(tmp_bak, old_bak)
+                        _safe_target(root, rt, rep.game_root)
+                        _safe_target(root, old_bak, rep.game_root)
+                        if old_bak.exists():
+                            _displace(old_bak)
+                        rep.hashes[_rel(old_bak)] = net.sha256(rt)
+                        rep.written.append(_rel(old_bak))
+                        _checkpoint(rep)
+                        _atomic_copy(rt, old_bak)
                     except OSError as e:
-                        try:
-                            tmp_bak.unlink()
-                        except OSError:
-                            pass
                         raise InstallError(
                             f"Could not back up the mod's own runtime before "
                             f"replacing it ({e}). Nothing was replaced.") from e
@@ -3303,12 +3595,10 @@ def install(g: games.Game, opt: Options, on_step=None, on_prog=None, on_log=None
             # Whether it ended with a newline decides what uninstall has to
             # put back: set_option adds one when it is missing.
             had_nl = remix.ends_with_newline(conf)
-            if not remix.set_option(conf, key, "True"):
-                raise InstallError(f"Could not write {conf}. Close the game "
-                                   f"and the Remix toolkit, then try again.")
             rep.remix = {"conf": _rel(conf), "key": key,
                          "trex": _rel(trex), "flavour": flavour,
                          "conf_final_newline": had_nl}
+            _remix_option(conf, key, rep, root)
             log(f"      {_rel(conf)}: {key} = True")
             log("      (that one line; every other setting in rtx.conf is "
                 "left exactly as it was)")
@@ -3324,6 +3614,7 @@ def install(g: games.Game, opt: Options, on_step=None, on_prog=None, on_log=None
                 "No ReShade, no feeder and no add-on go into a Remix game. A "
                 "ReShade proxy DLL left in this folder crashes it before it "
                 "draws a frame.")
+            _verify_written(root, rep, log)
             clear_failure(root)     # this folder's last failure is history now
             _set_gpu_pref(root, g, opt, rep, log)
             _finish_record(_write_manifest(root, g, opt, rep, proxy, level, complete=True), rep, log)
@@ -3389,8 +3680,8 @@ def install(g: games.Game, opt: Options, on_step=None, on_prog=None, on_log=None
                                  "with \"wilsjo2's fork\" in 'optiscaler build'.")
             try:
                 for f in optiscaler.install(root, proxy=oproxy, dl=dl, log=log,
-                                            backup=lambda p: _backup(p, rep, root),
-                                            release=orel):
+                                            backup=lambda p: _prepare_write(p, rep, root),
+                                            writer=lambda src, dst: _copy(src, dst, rep, root), release=orel):
                     rep.written.append(f)
             except RuntimeError as e:      # the archive carried no OptiScaler
                 raise InstallError(str(e)) from e
@@ -3465,10 +3756,10 @@ def install(g: games.Game, opt: Options, on_step=None, on_prog=None, on_log=None
                 # a setting, and its default is off (#81).
                 for k, v in optiscaler.PRESR_BEFORE_SR.items():
                     nr_settings.setdefault(k, v)
-            optiscaler.enable_nr(root, log, settings=nr_settings)
+            _configure(root, rep, optiscaler.enable_nr, log, settings=nr_settings, names=(optiscaler.INI,))
             if opt.opti_build == optiscaler.PRESR_MFG:
                 # The package ships its unlock switched off (#286).
-                if not optiscaler.enable_mfg_unlock(root, log):
+                if not _configure(root, rep, optiscaler.enable_mfg_unlock, log, names=(optiscaler.INI,)):
                     # Silent until the 2.0.5 gate: the install then said
                     # nothing and the unlock was simply never there.
                     rep.warnings.append("the RTX 40 MFG unlock could not be switched on - "
@@ -3481,11 +3772,11 @@ def install(g: games.Game, opt: Options, on_step=None, on_prog=None, on_log=None
                 rep.warnings += _mfg_warnings(g, opt, root, written=rep.written)
             # A keyboard without an Insert key has no way into the overlay,
             # which is where neural rendering is switched on (#88).
-            optiscaler.set_overlay_key(root, _overlay_key_pref(), log)
+            _configure(root, rep, optiscaler.set_overlay_key, _overlay_key_pref(), log, names=(optiscaler.INI,))
             for line in optiscaler.describe_nr(nr_settings):
                 rep.notes.append(line)
             if opt.fg and g.api == "DX12":
-                if optiscaler.enable_fg(root, log):
+                if _configure(root, rep, optiscaler.enable_fg, log, names=(optiscaler.INI,)):
                     if opt.opti_build == optiscaler.PRESR_MFG:
                         # Only once FSR frame generation is really on: with
                         # the libraries missing it is not, and the warning
@@ -3511,7 +3802,7 @@ def install(g: games.Game, opt: Options, on_step=None, on_prog=None, on_log=None
                 rep.warnings.append("frame generation was requested but the "
                                     "game is not D3D12; not enabled")
             if _opti_needs_dlss(opt):
-                optiscaler.enable_inputs(root, opt.upscaler, g.api, log)
+                _configure(root, rep, optiscaler.enable_inputs, opt.upscaler, g.api, log, names=(optiscaler.INI,))
                 rep.notes.append(
                     f"no DLSS in this game: OptiScaler hooks its "
                     f"{'FSR 2/3' if opt.upscaler == 'fsr' else 'XeSS'} calls "
@@ -3523,7 +3814,7 @@ def install(g: games.Game, opt: Options, on_step=None, on_prog=None, on_log=None
                 # The model refuses to run on a D3D11 device. OptiScaler gets
                 # around it by running the upscaler on D3D12 underneath -
                 # which means DLSS cannot be the upscaler here, FSR is.
-                optiscaler.set_dx11_bridged_upscaler(root, log)
+                _configure(root, rep, optiscaler.set_dx11_bridged_upscaler, log, names=(optiscaler.INI,))
                 rep.notes.append("D3D11 game: OptiScaler's upscaler set to FSR "
                                  "2.2 on D3D12 (the model does not run on "
                                  "D3D11 directly; DLSS cannot be the upscaler "
@@ -3538,8 +3829,11 @@ def install(g: games.Game, opt: Options, on_step=None, on_prog=None, on_log=None
             rep.notes.append(f"OptiScaler proxy: {oproxy}")
             # Record the name OptiScaler actually went in under, not the
             # ReShade proxy this route never installs.
+            _verify_written(root, rep, log)
             _set_gpu_pref(root, g, opt, rep, log)
             _finish_record(_write_manifest(root, g, opt, rep, oproxy, level, complete=True), rep, log)
+            if not record_lost(rep):
+                prefs.add_install(root)
             prog(100, "Done")
             return rep
 
@@ -3555,8 +3849,11 @@ def install(g: games.Game, opt: Options, on_step=None, on_prog=None, on_log=None
                 "32-bit game")
         elif opt.vr:
             from . import openxr
-            xr_manifest, xr_fresh = openxr.install_layer(setup, log)
-            prefs.add_openxr_game(root)
+            rep.layer_pending = True
+            _checkpoint(rep)
+            with prefs.mutation_lock():
+                prefs.add_openxr_game(root)
+                xr_manifest, xr_fresh = openxr.install_layer(setup, log)
             if xr_fresh:
                 rep.notes.append("registered ReShade as an OpenXR layer for this "
                                  "user, so the pass reaches the headset's image; "
@@ -3579,8 +3876,11 @@ def install(g: games.Game, opt: Options, on_step=None, on_prog=None, on_log=None
             # Its own name: "fresh" is the rollback's (is this folder new to
             # us?), and install_layer's True on every reinstall made a
             # failed "update all" take a working install away (gate 2.0.6).
-            manifest, layer_new = vulkan.install_layer(setup, log, also32=not x64)
-            prefs.add_vulkan_game(root)
+            rep.layer_pending = True
+            _checkpoint(rep)
+            with prefs.mutation_lock():
+                prefs.add_vulkan_game(root)
+                manifest, layer_new = vulkan.install_layer(setup, log, also32=not x64)
             if layer_new:
                 rep.notes.append("registered ReShade as a Vulkan layer for this "
                                  "user - it now loads into EVERY Vulkan "
@@ -3591,13 +3891,12 @@ def install(g: games.Game, opt: Options, on_step=None, on_prog=None, on_log=None
                 rep.notes.append(f"reused the existing ReShade Vulkan layer "
                                  f"({manifest})")
         else:
-            _backup(root / proxy, rep, root)
-            net.extract_one(setup, "ReShade64.dll" if x64 else "ReShade32.dll",
-                            root / proxy)
+            _extract(setup, "ReShade64.dll" if x64 else "ReShade32.dll",
+                     root / proxy, rep, root)
             rep.written.append(proxy)
             log(f"      {proxy} <- ReShade{'64' if x64 else '32'}.dll")
         if not x64 and opt.path == FEEDER:
-            net.extract_one(setup, "ReShade64.dll", host / "dxgi.dll")
+            _extract(setup, "ReShade64.dll", host / "dxgi.dll", rep, root)
             rep.written.append(f"{HOST_DIR}/dxgi.dll")
             log(f"      {HOST_DIR}/dxgi.dll <- ReShade64.dll (for the helper process)")
 
@@ -3615,7 +3914,7 @@ def install(g: games.Game, opt: Options, on_step=None, on_prog=None, on_log=None
             legacy = root / LEGACY_BRIDGE_ADDON
             if legacy.is_file():
                 try:
-                    legacy.unlink()
+                    _remove_for_install(legacy, rep, root)
                     log("      removed the older dlss5-dx11-bridge.addon64 "
                         "(both loading at once conflict)")
                     rep.notes.append("removed a legacy dlss5-dx11-bridge.addon64")
@@ -3629,16 +3928,8 @@ def install(g: games.Game, opt: Options, on_step=None, on_prog=None, on_log=None
             # left from another route hooks the same device as this one's
             # (#439: DX11 Bridge 1.0.27 beside the feed, nothing ran). Kept
             # aside, not deleted: uninstall puts it back.
-            _backup(root / LEGACY_BRIDGE_ADDON, rep, root)
-            # Only once its copy is really there (or it is ours from last
-            # time): _backup says nothing when the copy fails, and the
-            # preview promised it comes back on uninstall (gate 2.0.6).
-            kept_copy = (root / (LEGACY_BRIDGE_ADDON + BACKUP_SUFFIX)).is_file() \
-                or LEGACY_BRIDGE_ADDON in rep.preinstalled
             try:
-                if not kept_copy:
-                    raise OSError("no backup copy")
-                (root / LEGACY_BRIDGE_ADDON).unlink()
+                _remove_for_install(root / LEGACY_BRIDGE_ADDON, rep, root)
                 log(f"      moved the older {LEGACY_BRIDGE_ADDON} aside "
                     f"(it would load beside this route's add-on)")
                 rep.notes.append(f"moved an older {LEGACY_BRIDGE_ADDON} aside")
@@ -3680,7 +3971,7 @@ def install(g: games.Game, opt: Options, on_step=None, on_prog=None, on_log=None
                 dest = root / SHADERS / h
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 _backup(dest, rep, root)
-                dest.write_bytes(net.fetch_text(sources.RESHADE_HEADERS_BASE + h))
+                _write_bytes(net.fetch_text(sources.RESHADE_HEADERS_BASE + h), dest, rep, root)
                 rep.written.append(str(Path(SHADERS) / h))
             log(f"      {', '.join(sources.RESHADE_HEADERS)}")
 
@@ -3987,7 +4278,7 @@ def install(g: games.Game, opt: Options, on_step=None, on_prog=None, on_log=None
         # --- 8) host64 --------------------------------------------------------
         if not x64 and opt.path == FEEDER:
             begin("host64 helper process")
-            reshade_ini.write_addon_only_ini(host)
+            _configure(host, rep, reshade_ini.write_addon_only_ini, record_root=root)
             rep.written.append(f"{HOST_DIR}/ReShade.ini")
             log(f"      {HOST_DIR}/ ready (ReShade + DLSS parts inside)")
 
@@ -3999,7 +4290,8 @@ def install(g: games.Game, opt: Options, on_step=None, on_prog=None, on_log=None
                 taken = {refw.DINPUT8} if reengine.detected(root) else set()
                 try:
                     mtag, mfiles = mfg.install(root, g.exe, log, taken=taken,
-                                               preinstalled=rep.preinstalled)
+                                               preinstalled=rep.preinstalled,
+                                               writer=lambda src, dst: _copy(src, dst, rep, root))
                 # An opt-in extra: whatever stops it - a project that changed
                 # shape (#141), GitHub's rate limit, a proxy page - is a
                 # warning, not the end of an install that is otherwise done.
@@ -4031,19 +4323,22 @@ def install(g: games.Game, opt: Options, on_step=None, on_prog=None, on_log=None
             # The box is off: an unlock an earlier install of ours placed
             # here comes out, or it would keep hooking Streamline while the
             # new manifest says the option is off.
-            for gone in mfg.remove_leftovers(root, rep.preinstalled, log):
-                rep.preinstalled.discard(gone)
-                rep.preinstalled.discard(gone.replace("\\", "/"))
+            restored = mfg.remove_leftovers(root, rep.preinstalled, log,
+                                            hashes=(_previous_manifest(root) or {}).get("hashes", {}))
+            for gone in restored:
+                _forget_restored(gone, rep)
+            if restored:
+                _checkpoint(rep)
 
         # --- 9) ReShade configuration ----------------------------------------
         begin("ReShade configuration")
         if opt.path == FEEDER:
             _backup(root / "ReShade.ini", rep, root)
             _backup(root / "ReShadePreset.ini", rep, root)
-            reshade_ini.write_reshade_ini(root, opt.provider)
-            _ask_for_the_pass(root, opt, log)
-            reshade_ini.write_preset(root, opt.provider)
-            src = reshade_ini.carry_over(root, [Path(x) for x in prefs.installs()])
+            _configure(root, rep, reshade_ini.write_reshade_ini, opt.provider)
+            _configure(root, rep, _ask_for_the_pass, opt, log)
+            _configure(root, rep, reshade_ini.write_preset, opt.provider)
+            src = _configure(root, rep, reshade_ini.carry_over, [Path(x) for x in prefs.installs()])
             if src is not None:
                 log(f"      your ReShade keys and overlay settings carried over "
                     f"from {src.parent.name}")
@@ -4063,10 +4358,10 @@ def install(g: games.Game, opt: Options, on_step=None, on_prog=None, on_log=None
             # effect to compile and no technique order to get right. ReShade
             # only has to load the add-ons sitting next to the executable.
             _backup(root / "ReShade.ini", rep, root)
-            reshade_ini.write_addon_only_ini(root)
-            _ask_for_the_pass(root, opt, log)
+            _configure(root, rep, reshade_ini.write_addon_only_ini)
+            _configure(root, rep, _ask_for_the_pass, opt, log)
             if opt.path == ROUTE_RENODX:
-                reshade_ini.enable_renodx_dlss_nr(root)
+                _configure(root, rep, reshade_ini.enable_renodx_dlss_nr)
                 log("      [RENODX-DLSS] NeuralRenderingEnabled=1")
             if opt.path == UPSTREAM:
                 rep.notes.append("neural-upstream is configured from its 'NR "
@@ -4085,7 +4380,7 @@ def install(g: games.Game, opt: Options, on_step=None, on_prog=None, on_log=None
                 # Search paths so ReShade can compile the two shaders; no
                 # technique in any preset - the add-on schedules them itself
                 # inside its Present callback, in the order it needs.
-                reshade_ini.write_shader_paths(root)
+                _configure(root, rep, reshade_ini.write_shader_paths)
                 log("      shader search paths set, no technique enabled - the "
                     "add-on runs DLSS5_AIO_Feed and VORT itself")
                 # "F10 compares, F10 opens ReShade" is what this line read
@@ -4119,7 +4414,7 @@ def install(g: games.Game, opt: Options, on_step=None, on_prog=None, on_log=None
         if _key and (root / "ReShade.ini").is_file():
             written = True
             try:
-                reshade_ini.set_overlay_key(root, _key)
+                _configure(root, rep, reshade_ini.set_overlay_key, _key)
             except OSError as e:
                 # This runs after everything is written and before the
                 # manifest: an unwritable ReShade.ini here would have left a
@@ -4140,7 +4435,7 @@ def install(g: games.Game, opt: Options, on_step=None, on_prog=None, on_log=None
         if opt.path == FEEDER:
             begin("dlss5-feed.cfg")
             _backup(root / feedcfg.NAME, rep, root)
-            feedcfg.write(root, opt.feed, host_window=None if x64 else True)
+            _configure(root, rep, feedcfg.write, opt.feed, host_window=None if x64 else True, names=(feedcfg.NAME,))
             rep.written.append(feedcfg.NAME)
             summary = feedcfg.describe(opt.feed) if opt.feed else []
             if summary:
@@ -4156,7 +4451,7 @@ def install(g: games.Game, opt: Options, on_step=None, on_prog=None, on_log=None
             if (root / feedcfg.BRIDGE_NAME).is_file():
                 log("      merging into the existing dlss5-bridge.cfg")
             _backup(root / feedcfg.BRIDGE_NAME, rep, root)
-            feedcfg.write_bridge(root, cfg)
+            _configure(root, rep, feedcfg.write_bridge, cfg, names=(feedcfg.BRIDGE_NAME,))
             rep.written.append(feedcfg.BRIDGE_NAME)
             for line in feedcfg.describe_bridge(cfg):
                 log(f"      {line}")
@@ -4243,34 +4538,7 @@ def install(g: games.Game, opt: Options, on_step=None, on_prog=None, on_log=None
         log(f"Install did not finish. {left}")
         raise
 
-    # --- did everything survive? -------------------------------------------
-    # The DLSS 5 add-on and the neural-rendering runtime are unsigned, freshly
-    # built and rare, which is exactly what machine-learning antivirus
-    # heuristics flag - Defender has called renodx builds Trojan:Win32/
-    # Ulthar.A!ml and OptiScaler Trojan:Win32/Fonzi.A!ml. A quarantine removes
-    # the file after we wrote it, so the install reports success and the game
-    # then does nothing. Say so instead of leaving it a mystery.
-    missing = []
-    for rel in rep.written:
-        if rel.endswith(BACKUP_SUFFIX):
-            continue
-        if not (root / rel).exists():
-            missing.append(rel)
-    if missing:
-        names = ", ".join(missing[:4]) + ("..." if len(missing) > 4 else "")
-        rep.warnings.append(
-            f"{len(missing)} file(s) were written and are no longer there: "
-            f"{names}. Almost always this is antivirus quarantining them. "
-            f"These components are unsigned and uncommon, so heuristic "
-            f"scanners flag them; the detections are false positives on "
-            f"software this tool downloads from its publishers, not on the "
-            f"tool. Restore them from your antivirus quarantine and add this "
-            f"game folder to its exclusions, then install again.")
-        log("")
-        log(f"      !! {len(missing)} files vanished after being written "
-            f"- check your antivirus quarantine")
-        for m in missing[:8]:
-            log(f"         {m}")
+    _verify_written(root, rep, log)
 
     # --- record -----------------------------------------------------------
     clear_failure(root)     # this folder's last failure is history now
@@ -4285,8 +4553,53 @@ def install(g: games.Game, opt: Options, on_step=None, on_prog=None, on_log=None
 # ---------------------------------------------------------------- uninstall
 
 @gamelock.exclusive
+def apply_tune(g: games.Game, route: str, resolution: int, on_log=None) -> None:
+    """Apply a measured scale through the same recovery boundary as installation."""
+    if isinstance(resolution, bool) or not isinstance(resolution, int) or not 25 <= resolution <= 100:
+        raise InstallError("The working resolution must be an integer from 25 to 100.")
+    if route not in (FEEDER, OPTI):
+        raise InstallError("Only feeder and OptiScaler installs support this tuning action.")
+    _safe_target(g.folder, g.install_dir)
+    preflight(g)
+    root = g.install_dir
+    data = _previous_manifest(root)
+    if not data or data.get("path") != route or data.get("complete") is not True:
+        raise InstallError("The recorded install changed or is incomplete; check the game before applying this tune.")
+    if not isinstance(data.get("files"), list) or not isinstance(data.get("hashes"), dict):
+        raise InstallError("This legacy install has no verified ownership record for tuning.")
+    name = optiscaler.INI if route == OPTI else feedcfg.NAME
+    if not _record_hash(data, name) or not (root / name).is_file():
+        raise InstallError(f"The ownership of {name} cannot be verified; it was preserved.")
+    rep = Report(game_root=g.folder, written=list(data["files"]),
+                 preinstalled=_previously_ours(root), hashes=dict(data["hashes"]))
+    for rel in rep.written:
+        if not isinstance(rel, str):
+            raise InstallError("The install record contains an invalid path.")
+        _safe_target(root, root / rel, g.folder)
+
+    def checkpoint():
+        data.update(files=list(rep.written), hashes=dict(rep.hashes), complete=False)
+        _write_atomic(root / MANIFEST, json.dumps(data, ensure_ascii=False, indent=2))
+        return True
+
+    rep.checkpoint = checkpoint
+    log = on_log or (lambda *_: None)
+    if route == OPTI:
+        values = {"WorkingScale": round(resolution / 100.0, 3)}
+        _configure(root, rep, optiscaler.enable_nr, log, settings=values, names=(name,))
+        data["nr"] = dict(data.get("nr") or {}, **values)
+    else:
+        values = {"work_resolution": resolution}
+        _configure(root, rep, feedcfg.write, values, names=(name,))
+        data["feed_cfg"] = dict(data.get("feed_cfg") or {}, **values)
+    data.update(files=list(rep.written), hashes=dict(rep.hashes), complete=True)
+    _write_atomic(root / MANIFEST, json.dumps(data, ensure_ascii=False, indent=2))
+
+
+@gamelock.exclusive
 def uninstall(g: games.Game, on_log=None) -> list[str]:
     """Remove only what this tool wrote; never touch the game's own files."""
+    _safe_target(g.folder, g.install_dir)
     dlss.forget_walk(g.folder)
     dlss.forget_walk(g.install_dir)
     log = on_log or (lambda *_: None)
@@ -4301,87 +4614,23 @@ def uninstall(g: games.Game, on_log=None) -> list[str]:
     if found_man is not None:
         try:
             data = json.loads(found_man.read_text(encoding="utf8"))
+            if not isinstance(data, dict):
+                raise InstallError("The install record is not an object. No game files were removed.")
             # v1.0/v1.1 used Turkish keys
             files = data.get("files") or data.get("dosyalar") or []
             if found_man != man:
                 log(f"found an install recorded by an older version "
                     f"({found_man.name})")
-        except (OSError, json.JSONDecodeError):
-            files = []
-            data = {}
+        except (OSError, json.JSONDecodeError) as error:
+            raise InstallError("The install record could not be read. No game files were removed.") from error
     else:
-        files = [FEEDER_ADDON64, FEEDER_ADDON32, RENODX, RENODX_SF, UPSTREAM_ADDON,
-                 STANDALONE_ADDON, DLSSNR, DLSS, DLSSG,
-                 BRIDGE_ADDON, BRIDGE_CFG, feedcfg.NAME,
-                 # dgVoodoo2 was the DX9 translation until 1.6.0. Its files
-                 # stay on this list so an install made by an older release
-                 # still cleans up completely.
-                 "dgVoodoo.conf", "dgVoodooCpl.exe",
-                 "ReShade.ini", "ReShadePreset.ini",
-                 str(SHADERS / FEEDER_FX), str(SHADERS / STANDALONE_FX),
-                 str(SHADERS / VORT_FX), str(TEXTURES / VORT_TEXTURE),
-                 *mfg.FILES,
-                 *(f"{mfg.PLUGINS_DIR}/{n}" for n in mfg.PLUGIN_FILES)]
-        # A d3d9.dll here is ours (DXVK, or dgVoodoo2 from an older release)
-        # UNLESS the folder is a Remix game, where that name belongs to the
-        # Remix bridge client. With no manifest to tell them apart the Remix
-        # install wins: a file left behind is harmless, a deleted runtime is
-        # not.
-        if not remix.is_remix_game(root):
-            files.append("D3D9.dll")
-            # A Source game's DXVK sits where the engine loads it (#224).
-            for sub in ("bin/d3d9.dll", "bin/win64/d3d9.dll"):
-                try:
-                    if (root / sub).is_file() and dxvk.is_dxvk(root / sub):
-                        files.append(sub)
-                except Exception:
-                    pass
-        else:
-            log("RTX Remix is installed here: d3d9.dll is its runtime, left alone.")
-        # A DirectX 8 game's DXVK front end (#403). Only when it IS DXVK: a
-        # d3d8.dll beside an old game is as often a wrapper somebody put
-        # there (d3d8to9, a widescreen fix) as it is ours.
-        try:
-            if dxvk.is_dxvk(root / "d3d8.dll"):
-                files.append("d3d8.dll")
-        except Exception:
-            pass
-        # A plain nvngx.dll is the standalone add-on's bridge only when the
-        # add-on is there too; on its own it could be somebody's OptiScaler.
-        if (root / STANDALONE_ADDON).is_file():
-            files.append(STANDALONE_BRIDGE)
-        try:
-            files += [str(VORT_INCLUDE / f.name)
-                      for f in (root / VORT_INCLUDE).glob("vort_*.fxh")]
-        except OSError:
-            pass
-        files += [str(SHADERS / h) for h in sources.RESHADE_HEADERS]
-        # LumeniteFX shaders/includes/texture we may have dropped in
-        for d_ in (SHADERS, INCLUDE):
-            try:
-                files += [str(Path(d_) / f.name)
-                          for f in (root / d_).glob("lumenite_*")]
-            except OSError:
-                pass
-        try:
-            files += [str(Path(TEXTURES) / f.name)
-                      for f in (root / TEXTURES).glob("lumenite_*")]
-        except OSError:
-            pass
-        # ReShade under any of the other names it can load as - only when
-        # the file really is ReShade, a game's own d3d11.dll stays.
-        files += [n for n in RESHADE_PROXIES
-                  if n not in files and _is_reshade(root / n)]
-        # REFramework's dinput8.dll, same reasoning: a real one the person
-        # put there themselves - or is still using for something else -
-        # stays untouched unless it is confirmed to be ours by content.
-        if refw.DINPUT8 not in files and refw.is_reframework(root / refw.DINPUT8):
-            files.append(refw.DINPUT8)
-        # A runtime the dlss page updated sits beside the game's own under
-        # dlssupdate's suffix: it is the game's runtime, not a file of ours
-        # to delete by name.
-        files = [f for f in files if not (root / (f + ".dlss5-dlss-original")).is_file()]
-        log("No install record found; cleaning up by known filenames.")
+        raise InstallError("No install record was found. Unproven game files were preserved; no filename-based cleanup was attempted.")
+    if not isinstance(data, dict) or not isinstance(files, list):
+        raise InstallError("The install record is malformed. No game files were removed.")
+    if not isinstance(data.get("hashes"), dict):
+        log("Legacy install: files without byte ownership are preserved. Recorded originals can be restored while their backups are retained.")
+        data["hashes"] = {}
+    stuck: list[str] = []
 
     # The manifest is a file in the game folder, and anything can write it -
     # a broken install, a tool that "cleans" mods, a hand edit. Every name in
@@ -4411,7 +4660,7 @@ def uninstall(g: games.Game, on_log=None) -> list[str]:
     safe: list[str] = []
     for rel in files:
         try:
-            if not _permitted(rel):
+            if not isinstance(rel, str) or not _permitted(rel):
                 raise net.OutsideError(rel)
         except net.OutsideError:
             log(f"ignored an install record entry that points outside the "
@@ -4420,72 +4669,55 @@ def uninstall(g: games.Game, on_log=None) -> list[str]:
         safe.append(rel)
     files = safe
 
-    # Restore backups first, then delete the rest
-    # A safety net beyond the manifest: restore every backup sitting in the
-    # folder, even one an interrupted install left unrecorded.
-    try:
-        for bak in list(root.rglob("*" + BACKUP_SUFFIX)):
-            rel = str(bak.relative_to(root))
-            if rel not in files:
-                files.append(rel)
-    except OSError:
-        pass
-    # A runtime swapped where the game keeps it (#225) can sit above the
-    # executable's folder - Ready or Not keeps DLSS under Plugins - so the
-    # safety net looks there too, with the same bounded walk as detection.
-    try:
-        gf = Path(getattr(g, "folder", None) or root)
-        if gf != root:
-            # A backup that belongs to a DIFFERENT install of ours in the
-            # same game must be left alone: restoring it would put that
-            # install's swapped runtime back and delete the build it is
-            # running on, silently. Our manifest lives in the install
-            # folder and never beside a nested runtime, so "is there a
-            # manifest next to it" could not tell them apart - what can is
-            # whether THIS install recorded the file the backup is of
-            # (gate 1.9.1).
-            mine = {str(f).replace("\\", "/").lower() for f in files}
-            for h in dlss.find_dlss_files(gf, names=(DLSS + BACKUP_SUFFIX,)):
-                p = gf / h
-                if root in p.parents or str(p) in files:
-                    continue
-                twin = str(p)[:-len(BACKUP_SUFFIX)].replace("\\", "/").lower()
-                rel_twin = ""
-                try:
-                    rel_twin = str(Path(twin).relative_to(gf)).replace(
-                        "\\", "/").lower()
-                except ValueError:
-                    pass
-                claimed = twin in mine or (rel_twin and rel_twin in mine)
-                # With no file list at all the record is gone (an install
-                # that was interrupted before it wrote one), and the net is
-                # the only thing that would put the game's file back.
-                if claimed or not files:
-                    files.append(str(p))
-    except Exception:
-        pass
-
+    # Only recorded, byte-verified backups may restore a destination.
     all_suffixes = (BACKUP_SUFFIX,) + LEGACY_BACKUP_SUFFIXES
+    restored: set[str] = set()
     for rel in list(files):
-        suffix = next((s for s in all_suffixes if rel.endswith(s)), None)
+        suffix = next((value for value in all_suffixes if rel.endswith(value)), None)
         if suffix is None:
             continue
         bak = root / rel
         orig = bak.with_name(bak.name[:-len(suffix)])
+        original_key = _entry_key(rel[:-len(suffix)])
+        if not bak.is_file():
+            expected = _record_hash(data, rel)
+            restored.add(original_key)
+            if expected and orig.is_file() and net.sha256(orig) == expected:
+                continue
+            stuck.append(rel)
+            log(f"could not restore {orig.name}: its recorded original backup is missing")
+            continue
         try:
-            if bak.is_file():
-                shutil.copy2(bak, orig)
+            if not _permitted(str(orig.absolute())):
+                raise OSError("its destination leaves the game folder")
+            expected = _record_hash(data, rel)
+            if expected and net.sha256(bak) != expected:
+                raise OSError("the backup no longer matches the recorded original bytes")
+            backup_digest = net.sha256(bak)
+            if orig.is_file() and net.sha256(orig) != backup_digest:
+                written = _record_hash(data, rel[:-len(suffix)])
+                if not written or net.sha256(orig) != written:
+                    kept = _displace(orig)
+                    log(f"kept changed {orig.name} as {kept.name}")
+            _atomic_copy(bak, orig)
+            if expected:
                 bak.unlink()
-                removed.append(rel)
-                log(f"restored: {orig.name} (the game's own file)")
-        except OSError as e:
-            log(f"could not restore: {orig.name} ({e})")
+            else:
+                stuck.append(rel)
+                log(f"kept legacy {bak.name}: its earlier ownership cannot be proven")
+            removed.append(rel)
+            restored.add(original_key)
+            log(f"restored: {orig.name} (the game's own file)")
+        except (OSError, net.OutsideError) as error:
+            stuck.append(rel)
+            restored.add(original_key)
+            log(f"could not restore: {orig.name} ({error})")
 
     # The Remix route's one edit outside its own files: a single line in the
     # user's rtx.conf. It is never in `files` - that list gets deleted, and
     # deleting somebody's rtx.conf would take their whole mod configuration
     # with it - so the key is removed by name instead.
-    rx = data.get("remix") or {}
+    rx = data.get("remix") if isinstance(data.get("remix"), dict) else {}
     if rx.get("conf") and rx.get("key"):
         # Recorded relative to the game folder by the install (`_rel(conf)`),
         # so anything that resolves outside it came from a tampered record.
@@ -4507,14 +4739,13 @@ def uninstall(g: games.Game, on_log=None) -> list[str]:
                 f"folder: {rx['conf']}")
             conf_p = None
         try:
-            if conf_p is not None and remix.remove_option(
-                    conf_p, rx["key"],
-                    bool(rx.get("conf_final_newline", True))):
+            if conf_p is not None and _restore_remix(conf_p, rx):
                 removed.append(f"{rx['conf']} ({rx['key']})")
                 log(f"removed: {rx['key']} from {rx['conf']} "
                     f"(nothing else in the file was touched)")
         except OSError as e:
             log(f"could not edit {rx['conf']}: {e}")
+            stuck.append("Remix configuration")
 
     if getattr(g, "emu", None) is not None and g.exe:
         try:
@@ -4522,7 +4753,8 @@ def uninstall(g: games.Game, on_log=None) -> list[str]:
                 log(line)
         except Exception as e:
             log(f"could not restore the emulator's render backend: {e}")
-    for name in _restore_sidelined(root, data.get("sidelined"), log):
+            stuck.append("emulator render backend")
+    for name in _restore_sidelined(root, data.get("sidelined"), log, data.get("sidelined_hashes"), stuck):
         removed.append(name + SIDELINE_SUFFIX)
 
     # Compared with one slash and one case: the no-record fallback lists
@@ -4532,17 +4764,24 @@ def uninstall(g: games.Game, on_log=None) -> list[str]:
     def _key(r: str) -> str:
         return r.replace("\\", "/").lower()
 
-    restored = set()
-    for rel in files:
-        s = next((s for s in all_suffixes if rel.endswith(s)), None)
-        if s:
-            restored.add(_key(rel[:-len(s)]))
-    stuck: list[str] = []
     for rel in files:
         if any(rel.endswith(s) for s in all_suffixes) or _key(rel) in restored:
             continue
         p = root / rel
         if not p.is_file():
+            continue
+        expected = _record_hash(data, rel)
+        if not expected:
+            stuck.append(rel)
+            log(f"kept {rel}: its ownership is unproven")
+            continue
+        try:
+            if net.sha256(p) != expected:
+                kept = _displace(p)
+                log(f"kept changed {rel} as {kept.name}")
+        except OSError as error:
+            stuck.append(rel)
+            log(f"could not preserve changed {rel}: {error}")
             continue
         if _delete(p):
             removed.append(rel)
@@ -4552,58 +4791,23 @@ def uninstall(g: games.Game, on_log=None) -> list[str]:
             log(f"could not remove: {rel} (locked - is the game or its "
                 f"launcher still running?)")
 
+    # Never remove an entire helper subtree: it may contain later personal files.
     hostdir = root / HOST_DIR
-    if hostdir.is_dir():
-        shutil.rmtree(hostdir, ignore_errors=True)
-        removed.append(HOST_DIR + "/")
-        log(f"removed: {HOST_DIR}/")
-
-    # Logs the components write while the game runs. They appear after the
-    # install, so the manifest has never heard of them, and every uninstall
-    # used to leave the lot behind.
-    for name in RUNTIME_ARTIFACTS:
-        p = root / name
-        try:
-            if p.is_file():
-                p.unlink()
-                removed.append(name)
-                log(f"removed: {name} (log)")
-        except OSError:
-            pass
-    # DXVK names its logs after the executable; only when the DXVK was ours.
-    if data.get("dxvk"):
-        exe_rec = data.get("exe") or (g.exe.name if g.exe else "")
-        for name in dxvk.logs_for(Path(exe_rec)) if exe_rec else ():
-            p = root / name
-            try:
-                if p.is_file():
-                    p.unlink()
-                    removed.append(name)
-                    log(f"removed: {name} (log)")
-            except OSError:
-                pass
-    # OptiScaler's own log folder: take out its files, and the folder only if
-    # that leaves it empty - a game could have a folder of the same name.
-    logs = root / OPTI_LOG_DIR
     try:
-        if logs.is_dir():
-            for f in list(logs.glob("*")):
-                if f.is_file() and (f.name.lower().startswith("optiscaler")
-                                    or f.suffix.lower() == ".log"):
-                    f.unlink()
-                    removed.append(f"{OPTI_LOG_DIR}/{f.name}")
-            if not any(logs.iterdir()):
-                logs.rmdir()
-                removed.append(OPTI_LOG_DIR + "/")
-                log(f"removed: {OPTI_LOG_DIR}/")
-    except OSError:
-        pass
+        if _permitted(str(hostdir.absolute())) and hostdir.is_dir() and not any(hostdir.iterdir()):
+            hostdir.rmdir()
+            removed.append(HOST_DIR + "/")
+    except OSError as error:
+        log(f"kept the helper folder: {error}")
 
-    try:
-        _prov = int(data.get("provider")) if data.get("provider") is not None else None
-    except (TypeError, ValueError):
-        _prov = None
-    reshade_ini.remove_our_techniques(root, _prov)
+    if stuck:
+        data["complete"] = False
+        data["notes"] = ["Uninstall is incomplete. Files or original backups could not be verified or restored; all remaining recovery entries were kept."]
+        # Keep all entries: a missing original beside a failed backup must be recoverable on retry.
+        _write_atomic(man, json.dumps(data, ensure_ascii=False, indent=2))
+        _forget_walk(g, root)
+        raise InstallError("Uninstall is incomplete. Close the game and check the log; the recovery record and unverified files were preserved.")
+
     try:
         prefs.drop_install(root)
     except Exception:
@@ -4620,41 +4824,41 @@ def uninstall(g: games.Game, on_log=None) -> list[str]:
     # Windows' graphics preference for the game and the helper: per program,
     # so it goes with this install - as long as it still says what we wrote.
     try:
-        for exe in gpupref.restore(data.get("gpu_pref") or []):
+        for exe in gpupref.restore(_gpu_records(root, g, data.get("gpu_pref"))):
             removed.append(f"Windows graphics setting for {Path(exe).name}")
             log(f"removed: Windows graphics setting for {Path(exe).name}")
-    except Exception:
-        pass
+    except Exception as error:
+        data["complete"] = False
+        data["notes"] = [f"Uninstall could not restore the Windows graphics setting: {error}"]
+        _write_atomic(man, json.dumps(data, ensure_ascii=False, indent=2))
+        raise InstallError(f"Uninstall is incomplete: {error}. Its graphics recovery record was kept.") from error
 
     # The Vulkan layer is registered once for the whole user, so it may only be
     # removed when the LAST game that needs it goes. Removing it while another
     # Vulkan install still relies on it would silently break that game.
-    try:
-        if str(root) in prefs.openxr_games():
-            from . import openxr
-            still_xr = prefs.drop_openxr_game(root)
-            if still_xr:
-                log(f"kept the OpenXR layer: {len(still_xr)} other VR "
-                    f"install(s) still use it")
-            elif openxr.unregister():
-                removed.append("OpenXR layer registration")
-                log("removed: our ReShade OpenXR layer registration "
-                    "(no VR games left)")
-    except Exception:
-        pass
-    try:
-        was_vulkan = str(root) in prefs.vulkan_games()
-        if was_vulkan:
-            still = prefs.drop_vulkan_game(root)
-            if still:
-                log(f"kept the Vulkan layer: {len(still)} other Vulkan "
-                    f"install(s) still use it")
-            elif vulkan.unregister():
-                removed.append("Vulkan layer registration")
-                log("removed: our ReShade Vulkan layer registration "
-                    "(no Vulkan games left)")
-    except Exception:
-        pass
+    from . import openxr
+    with prefs.mutation_lock():
+        for title, read, drop, add, layer in (
+                ("OpenXR", prefs.openxr_games, prefs.drop_openxr_game, prefs.add_openxr_game, openxr),
+                ("Vulkan", prefs.vulkan_games, prefs.drop_vulkan_game, prefs.add_vulkan_game, vulkan)):
+            if str(root) not in read():
+                continue
+            try:
+                still = drop(root)
+                if still:
+                    log(f"kept the {title} layer: {len(still)} other install(s) still use it")
+                    continue
+                if layer.unregister():
+                    removed.append(f"{title} layer registration")
+                    log(f"removed: our ReShade {title} layer registration (no games left)")
+                if any(layer.is_ours(path) for path, _ in layer.registrations()):
+                    raise OSError(f"the {title} layer is still registered")
+            except Exception as error:
+                add(root)
+                data["complete"] = False
+                data["notes"] = [f"Uninstall could not restore the {title} layer: {error}"]
+                _write_atomic(man, json.dumps(data, ensure_ascii=False, indent=2))
+                raise InstallError(f"Uninstall is incomplete: {error}. Its recovery record was kept.") from error
 
     # Every folder a removed file lived in, deepest first, if it is empty now.
     # OptiScaler's zip alone brings D3D12_Optiscaler, DlssOverrides and
@@ -4675,27 +4879,6 @@ def uninstall(g: games.Game, on_log=None) -> list[str]:
         except OSError:
             pass
 
-    if stuck:
-        # A locked proxy DLL is the usual case: the game or its launcher is
-        # still up. Keep the record so the next uninstall can finish the job,
-        # and say so plainly instead of reporting success.
-        try:
-            data = json.loads(man.read_text(encoding="utf8")) if man.is_file() else {}
-        except (OSError, json.JSONDecodeError):
-            data = {}
-        data["files"] = stuck
-        data["complete"] = False
-        data["notes"] = [f"uninstall left {len(stuck)} locked file(s); run it "
-                         f"again with the game closed"]
-        try:
-            man.write_text(json.dumps(data, ensure_ascii=False, indent=2),
-                           encoding="utf8")
-        except OSError:
-            pass
-        log(f"Removed {len(removed)} items; {len(stuck)} could not be removed. "
-            f"Close the game and its launcher, then uninstall again.")
-        _forget_walk(g, root)
-        return removed
     man.unlink(missing_ok=True)
     for n in LEGACY_MANIFESTS:
         (root / n).unlink(missing_ok=True)

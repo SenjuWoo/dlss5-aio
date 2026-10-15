@@ -6,9 +6,18 @@ https://github.com/SenjuWoo/dlss5-aio/releases/latest
 Extract it, run DLSS5-AIO.exe, and press scan or add a game.
 The runtimes page updates existing compatible NVIDIA/AMD/Intel DLLs.
 Open a game to preview/install a compatible neural-rendering route.
-Restore original or uninstall returns preserved files.
+Restore original or uninstall returns verified recorded originals.
+Later edits are preserved under unused .dlss5-aio-displaced names.
+Older records without byte hashes cannot prove ownership: unverified
+files/backups stay available for review, and recovery may report incomplete.
+Read the log before retrying an incomplete operation. Close other game
+managers, updaters and emulators while AIO changes the same files.
 
 README.md explains support boundaries, logging and recovery.
-The 2x faster NR model announced October 13 debuts October 16.
+Log: %LOCALAPPDATA%\dlss5-aio\aio.log; enable debug logging in help.
+NVIDIA's October 13 announcement schedules the faster NR model for October 16.
+The bundled runtime versions were verified October 14; this is dated evidence.
+Report buttons open a prefilled GitHub form: opening sends its details to
+GitHub, and submitting publishes them. Review the form before submitting.
 The old numbered component folders and root SHA256SUMS.txt refer to
 legacy v1.4.8, which remains available for rollback.

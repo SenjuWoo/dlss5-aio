@@ -790,7 +790,9 @@ def issue_body(version: str, gpu_name: str, sm, driver: str, game, route: str,
         parts.append(f"\n**Last error in this session (not from an install "
                      f"into this folder)**\n```\n{session_error[-900:]}\n```\n")
     parts.append(_block(
-        f"autopilot.log (`{autopilot_log_path}`)",
+        "aio.log",
         _tool_log_lines(autopilot_tail or "", game, install_dir), 900))
     body = "".join(parts)
-    return body[:6000]
+    # The URL reaches GitHub on opening, before the user submits an issue.
+    from ..reportprivacy import public_text
+    return public_text(body, (install_dir, getattr(game, "folder", None), autopilot_log_path))[:6000]

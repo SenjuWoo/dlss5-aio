@@ -273,11 +273,20 @@ def is_loader(path: Path) -> bool:
         return False
 
 
-def _merge_ini(path: Path) -> None:
+def _merge_ini(path: Path, writer=None) -> None:
     """Put GLOBAL_SETS into [GlobalSets] of the loader's ini, keeping the rest."""
     from .optiscaler import _ini_set
     text = path.read_text(encoding="utf8", errors="replace") if path.is_file() else ""
-    path.write_text(_ini_set(text, "GlobalSets", GLOBAL_SETS), encoding="utf8")
+    from . import installer
+    updated = _ini_set(text, "GlobalSets", GLOBAL_SETS)
+    if writer is None:
+        installer._write_atomic(path, updated)
+    else:
+        import tempfile
+        with tempfile.TemporaryDirectory(dir=net.cache_dir()) as folder:
+            staged = Path(folder) / path.name
+            staged.write_text(updated, encoding="utf8")
+            writer(staged, path)
 
 
 class NoLoaderName(RuntimeError):
@@ -306,7 +315,7 @@ def _check_zip(zpath: Path, names, what: str) -> None:
 
 def install(exe_dir: Path, exe: Path | None, log=None,
             taken: set[str] = frozenset(),
-            preinstalled=()) -> tuple[str, list[str]]:
+            preinstalled=(), writer=None) -> tuple[str, list[str]]:
     """Put the unlock and its loader beside the game. Returns (tag, files).
 
     A file already under the loader's name is backed up once so uninstall
@@ -316,6 +325,9 @@ def install(exe_dir: Path, exe: Path | None, log=None,
     any other file, whatever it contains.
     """
     log = log or (lambda *_: None)
+    from . import installer
+    report = installer.Report()
+    writer = writer or (lambda src, dst: installer._copy(src, dst, report, exe_dir))
     ours_now = {str(p).replace("\\", "/").rsplit("/", 1)[-1].lower()
                 for p in preinstalled}
     name = loader_name(exe, taken, exe_dir, ours_now)
@@ -345,16 +357,16 @@ def install(exe_dir: Path, exe: Path | None, log=None,
         _check_zip(z, FILES, f"RTX40MFG-Unlock {tag}")
         written = []
         for n in PLUGIN_FILES:
-            net.extract_one(z, n, plug / n)
+            net.extract_one(z, n, plug / n, writer=writer)
             written.append(f"{PLUGINS_DIR}/{n}")
-        net.extract_one(z, UI_ADDON, exe_dir / UI_ADDON)
+        net.extract_one(z, UI_ADDON, exe_dir / UI_ADDON, writer=writer)
         written.append(UI_ADDON)
         log(f"      a loader is already here: {', '.join(PLUGIN_FILES)} into "
             f"{PLUGINS_DIR}/, {UI_ADDON} beside the game - its own loader "
             f"picks the .asi up, and nothing of anyone else's is replaced")
         log("      in game: ReShade overlay -> DLSS MFG tab -> Follow game, a "
             "fixed multiplier, or Dynamic")
-        return tag, written
+        return tag, list(dict.fromkeys(report.written + written))
     ltag, lurl = resolve_loader()
     lz = net.download(lurl, f"Ultimate-ASI-Loader-{ltag}_x64.zip")
     # Both archives are downloaded and checked before the first file lands:
@@ -367,34 +379,26 @@ def install(exe_dir: Path, exe: Path | None, log=None,
     ours = {str(p).replace("\\", "/").lower() for p in preinstalled}
     written: list[str] = []
     for n in FILES:
-        net.extract_one(z, n, exe_dir / n)
+        net.extract_one(z, n, exe_dir / n, writer=writer)
         written.append(n)
     log(f"      {', '.join(FILES)}")
 
     dest = exe_dir / name
-    bak = dest.with_name(name + BACKUP_SUFFIX)
-    if dest.is_file() and not bak.exists() and name.lower() not in ours:
-        try:
-            shutil.copy2(dest, bak)
-            written.append(bak.name)
-            log(f"      kept your existing {name} as {bak.name}")
-        except OSError:
-            log(f"      WARNING: could not back up the existing {name}")
-    net.extract_one(lz, LOADER_DLL, dest)
+    net.extract_one(lz, LOADER_DLL, dest, writer=writer)
     written.append(name)
     ini = dest.with_suffix(".ini")
     existed = ini.is_file() and ini.name.lower() not in ours
-    _merge_ini(ini)
+    _merge_ini(ini, writer=writer)
     if not existed:
         written.append(ini.name)
     log(f"      Ultimate ASI Loader {ltag} as {name} + {ini.name} "
         f"([GlobalSets] LoadExtraPlugins=RTX40MFG.asi)")
     log("      in game: ReShade overlay -> DLSS MFG tab -> Follow game, a "
         "fixed multiplier, or Dynamic")
-    return tag, written
+    return tag, list(dict.fromkeys(report.written + written))
 
 
-def remove_leftovers(exe_dir: Path, preinstalled, log=None) -> list[str]:
+def remove_leftovers(exe_dir: Path, preinstalled, log=None, hashes=None) -> list[str]:
     """Take out an earlier install's unlock when this one does not want it.
 
     A reinstall on the same route skips the full uninstall, so without this
@@ -403,39 +407,50 @@ def remove_leftovers(exe_dir: Path, preinstalled, log=None) -> list[str]:
     (the caller drops them from `preinstalled`).
     """
     log = log or (lambda *_: None)
+    from . import installer
     ours = {str(p).replace("\\", "/") for p in preinstalled}
     lowers = {p.lower() for p in ours}
     if not any(f.lower() in lowers for f in
                [*FILES] + [f"{PLUGINS_DIR}/{x}" for x in PLUGIN_FILES]):
         return []
+    # Prove every recorded original before removing any part of the active unlock.
+    for name in LOADER_NAMES:
+        backup = net.inside(exe_dir, name + BACKUP_SUFFIX)
+        if name.lower() in lowers and backup.is_file():
+            expected = installer._record_hash({"hashes": hashes or {}}, backup.name)
+            if not expected or net.sha256(backup) != expected:
+                raise OSError("The original ASI loader backup cannot be verified; all copies were preserved.")
     gone: list[str] = []
     for n in [*FILES] + [f"{PLUGINS_DIR}/{x}" for x in PLUGIN_FILES]:
-        p = exe_dir / n
+        p = net.inside(exe_dir, n)
         if n.lower() in lowers and p.is_file():
-            try:
-                p.unlink()
-                gone.append(n)
-            except OSError:
-                log(f"      WARNING: could not remove {n}")
+            # Legacy ownership lists have no hashes, so preserve their current bytes.
+            kept = installer._displace(p)
+            p.unlink()
+            gone.append(n)
+            log(f"      preserved {n} as {kept.name}")
     for n in LOADER_NAMES:
         if n.lower() not in lowers:
             continue
-        p = exe_dir / n
-        bak = p.with_name(n + BACKUP_SUFFIX)
-        try:
-            if p.is_file():
-                p.unlink()
-                gone.append(n)
-            if bak.is_file():
-                bak.replace(p)
-                gone.append(bak.name)
-                log(f"      put your own {n} back")
-            ini = p.with_suffix(".ini")
-            if ini.name.lower() in lowers and ini.is_file():
-                ini.unlink()
-                gone.append(ini.name)
-        except OSError:
-            log(f"      WARNING: could not remove {n}")
+        p = net.inside(exe_dir, n)
+        bak = net.inside(exe_dir, n + BACKUP_SUFFIX)
+        if p.is_file():
+            installer._displace(p)
+        if bak.is_file():
+            if net.sha256(bak) != installer._record_hash({"hashes": hashes or {}}, bak.name):
+                raise OSError("The original ASI loader backup changed during removal; copies were preserved.")
+            installer._atomic_copy(bak, p)
+            # The original stays available even if a later manifest commit fails.
+            gone.append(bak.name)
+            log(f"      put your own {n} back")
+        elif p.is_file():
+            p.unlink()
+        gone.append(n)
+        ini = p.with_suffix(".ini")
+        if ini.name.lower() in lowers and ini.is_file():
+            installer._displace(ini)
+            ini.unlink()
+            gone.append(ini.name)
     if gone:
         log(f"      multi-frame generation off: removed {', '.join(gone)}")
     return gone

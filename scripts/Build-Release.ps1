@@ -59,7 +59,9 @@ DLSS 5 AIO $version
 Run DLSS5-AIO.exe, then scan or add a game.
 Use runtimes for compatible existing NVIDIA/AMD/Intel DLL updates.
 Open a game for installation preview, neural-rendering routes, diagnostics and uninstall.
-Originals and personal settings are preserved. Close the game and other mod managers before changing it.
+Verified backups and recovery records protect originals and later personal edits.
+Older records without hashes require manual review; an incomplete uninstall retains its record and backups.
+Close the game and other mod managers before changing it.
 
 Log: %LOCALAPPDATA%\dlss5-aio\aio.log
 Detailed logging: help > debug logging, or --debug.

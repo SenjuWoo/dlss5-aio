@@ -16,6 +16,7 @@ import os
 import sys
 import threading
 import time
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
 FILE = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "dlss5-aio" / "settings.json"
@@ -33,11 +34,31 @@ def app_dir() -> Path:
 # first one's key, and a read that met a half-written file came back {} -
 # which the next set_ then wrote back as a one-key file, installs list gone.
 _lock = threading.RLock()
+_mutation = threading.RLock()
 # The text of the last settings read whole or written, per file (tests move
 # FILE), so a file that cannot be read for a moment is not taken for an
 # empty one. Text, not the dict: a caller that appends to a list it got
 # must not change the copy kept.
 _good: dict[str, str] = {}
+
+
+@contextmanager
+def mutation_lock():
+    """Serialize profile changes across CLI/GUI processes; reads remain available."""
+    from . import gamelock
+    with _mutation, ExitStack() as stack:
+        FILE.parent.mkdir(parents=True, exist_ok=True)
+        deadline = time.monotonic() + 15
+        while True:
+            try:
+                stack.enter_context(gamelock.locked(FILE.parent))
+                break
+            except OSError as e:
+                # Only OS lock contention is transient; path/permission errors stay errors.
+                if e.__cause__ is None or time.monotonic() >= deadline:
+                    raise
+                time.sleep(.02)
+        yield
 
 
 def _last_good() -> dict:
@@ -73,7 +94,8 @@ def load() -> dict:
 
 
 def save(data: dict) -> None:
-    with _lock:
+    with mutation_lock(), _lock:
+        tmp = None
         try:
             FILE.parent.mkdir(parents=True, exist_ok=True)
             text = json.dumps(data, ensure_ascii=False, indent=2)
@@ -88,16 +110,18 @@ def save(data: dict) -> None:
                 except PermissionError:
                     # another process has it open for reading this moment
                     if attempt == 5:
-                        try:
-                            tmp.unlink()
-                        except OSError:
-                            pass
-                        FILE.write_text(text, encoding="utf8")
-                        break
+                        raise
                     time.sleep(0.02)
             _good[str(FILE)] = text
-        except OSError:
-            pass
+        except OSError as e:
+            from . import log
+            log.write(f"settings were not saved; previous settings kept: {e}", "warn")
+        finally:
+            if tmp is not None:
+                try:
+                    tmp.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
 
 def get(key: str, default=None):
@@ -105,19 +129,20 @@ def get(key: str, default=None):
 
 
 def set_(key: str, value) -> None:
-    with _lock:
+    with mutation_lock(), _lock:
         d, readable = _read()
-        if not readable and str(FILE) not in _good:
-            # Nothing good seen yet this run: once more after a moment (a
-            # foreign writer mid-write), then keep the unreadable file beside
-            # it before writing, so what was in it can still be put back.
+        if not readable:
+            # Keep unreadable personal edits even after this run saw a good copy.
             time.sleep(0.05)
             d, readable = _read()
-            if not readable and str(FILE) not in _good:
+            if not readable:
                 try:
-                    FILE.with_name(FILE.name + ".unreadable").write_bytes(FILE.read_bytes())
-                except OSError:
-                    pass
+                    saved = FILE.with_name(f"{FILE.name}.unreadable.{time.time_ns()}")
+                    saved.write_bytes(FILE.read_bytes())
+                except OSError as e:
+                    from . import log
+                    log.write(f"settings were not saved; unreadable personal edits could not be preserved: {e}", "warn")
+                    return
         d[key] = value
         save(d)
 
@@ -224,19 +249,30 @@ def remember_renodx(path: Path | None) -> None:
 
 def installs() -> list[str]:
     """Every folder this tool has set up (and not removed since)."""
-    return [str(x) for x in (get("installs") or [])]
+    v = get("installs", [])
+    return [str(x) for x in v] if isinstance(v, list) else []
+
+
+def _change_paths(key: str, folder, add: bool) -> list[str]:
+    """Keep the list read and its edit under one shared profile lock."""
+    with mutation_lock():
+        old = get(key, [])
+        values = [str(x) for x in old] if isinstance(old, list) else []
+        path = str(folder)
+        same = lambda value: os.path.normcase(os.path.abspath(value)) == os.path.normcase(os.path.abspath(path))
+        if add and any(same(value) for value in values):
+            return values
+        values = values + [path] if add else [value for value in values if not same(value)]
+        set_(key, values)
+        return values
 
 
 def add_install(install_dir) -> None:
-    lst = installs()
-    if str(install_dir) not in lst:
-        lst.append(str(install_dir))
-        set_("installs", lst)
+    _change_paths("installs", install_dir, True)
 
 
 def drop_install(install_dir) -> None:
-    lst = [x for x in installs() if x != str(install_dir)]
-    set_("installs", lst)
+    _change_paths("installs", install_dir, False)
 
 
 def vulkan_games() -> list[str]:
@@ -245,19 +281,12 @@ def vulkan_games() -> list[str]:
 
 
 def add_vulkan_game(install_dir) -> None:
-    d = str(install_dir)
-    games_ = vulkan_games()
-    if d not in games_:
-        games_.append(d)
-        set_("vulkan_games", games_)
+    _change_paths("vulkan_games", install_dir, True)
 
 
 def drop_vulkan_game(install_dir) -> list[str]:
     """Forget this game and return the ones still registered."""
-    d = str(install_dir)
-    games_ = [g for g in vulkan_games() if g != d]
-    set_("vulkan_games", games_)
-    return games_
+    return _change_paths("vulkan_games", install_dir, False)
 
 
 # The VR installs that rely on our OpenXR layer registration, so the last
@@ -268,15 +297,8 @@ def openxr_games() -> list[str]:
 
 
 def add_openxr_game(install_dir) -> None:
-    d = str(install_dir)
-    games_ = openxr_games()
-    if d not in games_:
-        games_.append(d)
-        set_("openxr_games", games_)
+    _change_paths("openxr_games", install_dir, True)
 
 
 def drop_openxr_game(install_dir) -> list[str]:
-    d = str(install_dir)
-    games_ = [g for g in openxr_games() if g != d]
-    set_("openxr_games", games_)
-    return games_
+    return _change_paths("openxr_games", install_dir, False)

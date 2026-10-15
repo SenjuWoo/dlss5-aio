@@ -229,5 +229,11 @@ def export_side_by_side(a: Path, b: Path, out: Path, master=None,
 
 
 def export_name(install_dir: Path) -> Path:
+    """Keep earlier exports when two are made in the same second."""
     stamp = time.strftime("%Y-%m-%d %H-%M-%S")
-    return Path(install_dir) / f"{OUR_PREFIX}_{stamp}.png"
+    out = Path(install_dir) / f"{OUR_PREFIX}_{stamp}.png"
+    number = 1
+    while out.exists():
+        out = Path(install_dir) / f"{OUR_PREFIX}_{stamp}_{number}.png"
+        number += 1
+    return out

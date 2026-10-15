@@ -207,7 +207,7 @@ def _same(a, b) -> bool:
     return str(a).replace("/", "\\").lower() == str(b).replace("/", "\\").lower()
 
 
-def apply(exes, before=()) -> tuple[list[dict], list[str]]:
+def apply(exes, before=(), checkpoint=None) -> tuple[list[dict], list[str]]:
     """Set High performance for each exe. Returns (records, theirs).
 
     A record is {"exe", "was", "wrote"}: the string before this tool touched
@@ -221,7 +221,9 @@ def apply(exes, before=()) -> tuple[list[dict], list[str]]:
     theirs: list[str] = []
     for exe in exes:
         path = str(exe)
-        have = chosen(path)
+        was = backend.get(path)
+        tokens = _tokens(was)
+        have = next((v for k, v in tokens if k.lower() == TOKEN.lower()), None)
         if have is not None:
             old = next((r for r in before or () if isinstance(r, dict)
                         and _same(r.get("exe", ""), path)), None)
@@ -230,15 +232,20 @@ def apply(exes, before=()) -> tuple[list[dict], list[str]]:
             else:
                 theirs.append(path)     # chosen by the person, or changed since
             continue
-        was = backend.get(path)
-        tokens = _tokens(was)
         tokens.append((TOKEN, HIGH))
         wrote = _join(tokens)
+        record = {"exe": path, "was": was, "wrote": wrote}
+        # A crash after SetValue must still leave enough evidence to undo our token.
+        if checkpoint is not None:
+            checkpoint(records + [record])
+        if backend.get(path) != was:
+            theirs.append(path)
+            continue
         try:
             backend.set(path, wrote)
         except OSError:
             continue                    # not written, so not recorded
-        records.append({"exe": path, "was": was, "wrote": wrote})
+        records.append(record)
     return records, theirs
 
 

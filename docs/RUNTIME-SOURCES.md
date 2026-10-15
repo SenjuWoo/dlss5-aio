@@ -1,6 +1,6 @@
 # Runtime sources and verified versions
 
-Snapshot checked October 14, 2026. Runtime maintenance and DLSS 5 neural rendering are separate workflows: replacing a DLL updates an existing compatible integration; it cannot create one.
+Runtime snapshot checked October 14, 2026; download and recovery boundaries re-audited October 15 for v2.0.1. The version research below is retained as dated evidence, not a new upstream lookup. Runtime maintenance and DLSS 5 neural rendering are separate workflows: replacing a DLL updates an existing compatible integration; it cannot create one.
 
 ## What is available
 
@@ -36,7 +36,9 @@ The newer NVIDIA mirror records originate in the [RHI manifest snapshot at `b057
 | [FG 310.9.16](https://github.com/RankFTW/rhi-repo/releases/tag/dlssg-310.9.16) | `20f967c689e73803769df30a63b9d70fa6339257c1612d687b7414aabf847766` | `cadee1aa6db3907babdc3285da2aebc4553d92b89c38ba3eae8abd8bba1bea72` |
 | [RR 310.9.16](https://github.com/RankFTW/rhi-repo/releases/tag/dlssd-310.9.16) | `33470176d595838fb8751023c56e1e2b56e0da8d19c5c140b1bb325a53984ff2` | `7006c3a729276e876e06a97c6262672a1be96a58d69b0e85877f911146b98fbe` |
 
-RHI is a community host. A GitHub digest authenticates the retrieved asset bytes; it does not make that repository an NVIDIA publisher. The audit verified all 12 current families against their expected digest/size, x64 DLL format and actual Windows FileVersion, then checked Windows Authenticode: 12/12 Valid, with NVIDIA, Intel or AMD publishers. This is evidence for these exact files. New refreshed mirror entries require the release digest, safe archive layout, x64 DLL format and matching Windows FileVersion; the downloader does not perform a fresh Authenticode check on every future candidate. No DLL is executed during validation.
+RHI is a community host. A GitHub digest authenticates the retrieved asset bytes; it does not make that repository an NVIDIA publisher. The original audit verified all 12 snapshot families against their expected digest/size, x64 DLL format and actual Windows FileVersion, then checked Windows Authenticode: 12/12 Valid, with NVIDIA, Intel or AMD publishers. This evidence applies to those exact bytes.
+
+In v2.0.1, refreshed NVIDIA mirror entries without a bundled extracted-DLL SHA256 also require fresh Windows Authenticode verification: status `Valid` and signer `NVIDIA Corporation`, plus matching runtime-family product metadata. Verification fails closed if Windows cannot establish that result. Known extracted-DLL pins remain usable offline by checking the exact previously audited SHA256/size, format and FileVersion. The release asset digest, safe archive layout and matching filename are required in both cases. No runtime DLL is loaded or executed during validation.
 
 ## Refresh and compatibility limits
 
@@ -44,7 +46,11 @@ The shipped AMD and Intel entries are a verified dated snapshot. **Check again**
 
 Archives must contain exactly one expected DLL basename and optional documentation. Traversal, duplicate names, symlinks, encryption, unrelated executable payloads and excessive expansion are refused. Downloads stay in AIO's cache until the updater rechecks the game's current bytes, preserves its original, and stages a verified replacement.
 
-Runtime resolution serializes shared cache writes across threads and uses an operating-system cache lock across AIO processes. Another process holding that lock is refused safely; retry after it finishes. The expected archive/file size is capped at 256 MiB and checked after download. The inherited transport does not enforce a streaming byte cap, so an unexpectedly oversized server response can consume extra temporary disk space before it is rejected.
+Runtime resolution serializes shared cache writes across threads and uses an operating-system cache lock across AIO processes. Another process holding that lock is refused safely; retry after it finishes. Downloads bind their cache entries to the exact source URL. A failed refresh preserves the earlier completed cache entry instead of replacing it with partial bytes.
+
+The expected archive/file size is capped at 256 MiB. Runtime downloads pass that exact expected size as the transport's `max_bytes`; declared and streamed response sizes are bounded, then exact size and SHA256 are checked before extraction or placement. Small API/HTML responses and extractor subprocess output have separate bounds. Archive inspection precedes extraction, and extractor timeouts terminate and reap the owned child process.
+
+Installation and runtime restoration use durable recovery records and staged, byte-verified copies. Later personal edits are preserved separately. Historical install, emulator or ASI-loader backups without ownership hashes are retained for review rather than silently treated as verified originals. Other applications do not share AIO's game/profile/cache locks; close them before modifying the same files.
 
 NR selection belongs to the neural-rendering installer. The inspected community feed lists SF-v2 (310.8.2, RTX 20/30/40/50) separately from Lecram (310.8.3, RTX 50 only). Picking the first NR entry globally would be wrong for an RTX 4080. Neither entry proves availability of the October 16 model. Proxy/cost-scaler installations also require preserving their renamed real NR DLL and ownership records; generic runtime refresh does not overwrite that layout.
 
