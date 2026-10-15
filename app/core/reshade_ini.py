@@ -1,0 +1,423 @@
+r"""Reading and writing ReShade .ini files.
+
+ReShade stores multi-values comma-separated and escapes a literal comma as
+",,". Key names match crosire/reshade's runtime.cpp:
+  ReShade.ini [GENERAL] : EffectSearchPaths, TextureSearchPaths,
+                          PreprocessorDefinitions, PresetPath
+  ReShade.ini [ADDON]   : AddonPath
+  preset root (no section): Techniques, TechniqueSorting, PreprocessorDefinitions
+Technique entries look like "TechniqueName@File.fx".
+
+IMPORTANT: the motion-vector provider's technique must sit ABOVE DLSS5_Feed in
+the technique list, otherwise the feed never receives vectors.
+"""
+from __future__ import annotations
+
+from pathlib import Path
+
+# Provider number -> (label, technique entry or None, we install the shader)
+PROVIDERS = {
+    3: ("LumeniteFX Kernel 2.0 (recommended)", "Lumenite_Kernel@lumenite_Kernel.fx", True),
+    4: ("LumeniteFX QuantMotion", "Lumenite_QuantMotion@lumenite_QuantMotion.fx", True),
+    0: ("Generic texMotionVectors (qUINT etc. - install it yourself)", None, False),
+    1: ("iMMERSE Launchpad (install it yourself)", None, False),
+    # VORT Motion (Vortigern, MIT): optical-flow motion vectors from the
+    # colour buffer alone. The default on OpenGL, where LumeniteFX reads 0%
+    # motion (perseval-BLR, six GL games); works on the other APIs too.
+    2: ("VORT Motion (optical flow - the OpenGL default)",
+        "vort_MotionEffects@vort_Motion.fx", True),
+}
+
+FEED_TECHNIQUE = "DLSS5_Feed@DLSS5_Feed.fx"
+
+
+class Ini:
+    """Ordered sections; the first is always the root ("")."""
+
+    def __init__(self) -> None:
+        self.sections: list[tuple[str, list[list[str]]]] = [("", [])]
+
+    @classmethod
+    def parse(cls, text: str) -> "Ini":
+        ini = cls()
+        cur = 0
+        for line in text.lstrip("\ufeff").splitlines():
+            s = line.strip()
+            if not s or s[0] in ";#":
+                continue
+            if s.startswith("[") and s.endswith("]"):
+                cur = ini._index(s[1:-1])
+                continue
+            if "=" in s:
+                k, v = s.split("=", 1)
+                ini.sections[cur][1].append([k.strip(), v.strip()])
+        return ini
+
+    @classmethod
+    def load(cls, path: Path) -> "Ini":
+        try:
+            return cls.parse(path.read_text(encoding="utf8", errors="replace"))
+        except OSError:
+            return cls()
+
+    def _index(self, name: str) -> int:
+        for i, (n, _) in enumerate(self.sections):
+            if n.lower() == name.lower():
+                return i
+        self.sections.append((name, []))
+        return len(self.sections) - 1
+
+    def get(self, section: str, key: str) -> str | None:
+        for n, kv in self.sections:
+            if n.lower() == section.lower():
+                for k, v in kv:
+                    if k.lower() == key.lower():
+                        return v
+        return None
+
+    def set(self, section: str, key: str, value: str) -> None:
+        kv = self.sections[self._index(section)][1]
+        for e in kv:
+            if e[0].lower() == key.lower():
+                e[1] = value
+                return
+        kv.append([key, value])
+
+    def set_default(self, section: str, key: str, value: str) -> None:
+        if self.get(section, key) is None:
+            self.set(section, key, value)
+
+    def dump(self) -> str:
+        out: list[str] = []
+        for name, kv in self.sections:
+            if not kv and not name:
+                continue
+            if name:
+                if out:
+                    out.append("")
+                out.append(f"[{name}]")
+            out += [f"{k}={v}" for k, v in kv]
+        return "\n".join(out) + "\n"
+
+    def save(self, path: Path) -> None:
+        path.write_text(self.dump(), encoding="utf8")
+
+
+def split_list(raw: str) -> list[str]:
+    """Split on single commas; ",," is an escaped comma."""
+    items, cur, i = [], "", 0
+    while i < len(raw):
+        if raw[i] == ",":
+            if i + 1 < len(raw) and raw[i + 1] == ",":
+                cur += ","
+                i += 2
+                continue
+            items.append(cur)
+            cur = ""
+        else:
+            cur += raw[i]
+        i += 1
+    if cur:
+        items.append(cur)
+    return [s for s in items if s]
+
+
+def join_list(items: list[str]) -> str:
+    return ",".join(s.replace(",", ",,") for s in items)
+
+
+def _ensure_define(raw: str, define: str) -> str:
+    name = define.split("=", 1)[0]
+    kept = [d for d in split_list(raw) if d.split("=", 1)[0] != name]
+    kept.append(define)
+    return join_list(kept)
+
+
+def write_reshade_ini(game_dir: Path, provider: int = 3) -> None:
+    """Create/update ReShade.ini without touching the user's own settings."""
+    p = game_dir / "ReShade.ini"
+    ini = Ini.load(p)
+    ini.set_default("GENERAL", "EffectSearchPaths", r".\reshade-shaders\Shaders\**")
+    ini.set_default("GENERAL", "TextureSearchPaths", r".\reshade-shaders\Textures\**")
+    ini.set_default("GENERAL", "PresetPath", r".\ReShadePreset.ini")
+    ini.set("GENERAL", "PreprocessorDefinitions",
+            _ensure_define(ini.get("GENERAL", "PreprocessorDefinitions") or "",
+                           f"DLSS5_MV_PROVIDER={provider}"))
+    # Add-ons live next to the game executable; tell ReShade explicitly.
+    ini.set_default("ADDON", "AddonPath", ".\\")
+    ini.save(p)
+
+
+# The overlay key, for keyboards that do not have the default one. ReShade
+# opens on Home and OptiScaler on Insert, and a laptop or a 60% keyboard
+# often has neither (#88). Windows virtual-key codes, because that is what
+# both of them store: ReShade as "<vk>,0,0,0" in [INPUT] KeyOverlay,
+# OptiScaler as hex in [Menu] ShortcutKey.
+# What "write nothing" is stored as in the table. ReShade then opens on
+# Home and OptiScaler on Insert, which is why the entry is not named after
+# either of them - and why it may not carry Home's own key code: with both
+# on 0x24 the stored value could not say which of the two had been picked,
+# so picking Home wrote Home and then told the person to press Insert.
+ROUTE_DEFAULT = 0
+
+OVERLAY_KEYS = {
+    # Not "Home": this entry writes nothing, and ReShade then opens on
+    # Home while OptiScaler opens on Insert. Naming one was wrong on the
+    # other route. It must keep the word "default" - the GUI reads it.
+    "route default": ROUTE_DEFAULT,
+    # Home is ReShade's own default and OptiScaler's is Insert, so both are
+    # listed: on the OptiScaler route "route default" is Insert, and someone
+    # who wants Home has to be able to ask for it.
+    "Home": 0x24,
+    "Insert": 0x2D,
+    "End": 0x23,
+    "Delete": 0x2E,
+    "Page Up": 0x21,
+    "Page Down": 0x22,
+    "Backspace": 0x08,
+    "F9": 0x78,
+    "F10": 0x79,
+    "F11": 0x7A,
+    "F12": 0x7B,
+    # Two more that full-size and compact boards both tend to keep, for a
+    # keyboard with no Home, Insert or navigation cluster at all (#214).
+    "Pause": 0x13,
+    "Scroll Lock": 0x91,
+}
+
+
+def overlay_key_name(default: str = "Home") -> str:
+    """What to tell the person to press, given what they chose.
+
+    Every "press Home" and "press Insert" in the install instructions and
+    the diagnosis goes through here. The video player's own ReShade is not
+    written with this key and keeps Home.
+    A person who rebound the key because their keyboard has neither (#88)
+    must not then be told to press one of them.
+    """
+    from . import prefs
+    try:
+        vk = int(prefs.get("overlay_key") or 0)
+    except (TypeError, ValueError):
+        vk = 0
+    # ROUTE_DEFAULT means "write nothing", and it is stored as 0. A hand
+    # edited settings file can still carry the code itself, and the caller
+    # knows which key its own route opens on, so it is the same answer.
+    if not vk:                    # ROUTE_DEFAULT: the caller's own key
+        return default
+    for name, code in OVERLAY_KEYS.items():
+        if code == vk:
+            return name
+    return f"0x{vk:02X}"
+
+
+def set_overlay_key(game_dir: Path, vk: int) -> None:
+    """Bind ReShade's overlay to `vk`. The three zeros are ctrl/shift/alt."""
+    if not vk:
+        return
+    p = Path(game_dir) / "ReShade.ini"
+    if not p.is_file():
+        return          # nothing to edit; the install writes it before this
+    ini = Ini.load(p)
+    if len(ini.sections) == 1 and not ini.sections[0][1]:
+        # Load swallows an OSError and hands back an empty Ini (one root
+        # section, no keys). Saving that would replace every ReShade
+        # setting the person has with a single key.
+        raise OSError(f"{p} could not be read")
+    ini.set("INPUT", "KeyOverlay", f"{int(vk)},0,0,0")
+    ini.save(p)
+
+
+# The sections of ReShade.ini that hold what the user set up by hand in the
+# overlay: key bindings, overlay behaviour (tutorial done, fps counter, font
+# size), the theme. ReShade keeps them per game, so every fresh install used
+# to start from scratch - Home key tutorial and all.
+CARRY_SECTIONS = ("INPUT", "OVERLAY", "STYLE")
+
+
+def carry_over(game_dir: Path, others: list[Path]) -> Path | None:
+    """Seed this game's ReShade.ini with the user's settings from another.
+
+    The source is the most recently modified ReShade.ini among `others` that
+    carries any of the sections above. Only keys this file does not have yet
+    are copied - nothing the user set here is overruled. Returns the source
+    used, or None.
+    """
+    p = game_dir / "ReShade.ini"
+    cands = []
+    for d in others:
+        try:
+            d = Path(d)
+            if d.resolve() == game_dir.resolve():
+                continue
+            src = d / "ReShade.ini"
+            if src.is_file():
+                cands.append((src.stat().st_mtime, src))
+        except OSError:
+            continue
+    for _, src in sorted(cands, reverse=True):
+        theirs = Ini.load(src)
+        pairs = [(sec, k, v) for sec, kv in theirs.sections
+                 if sec.upper() in CARRY_SECTIONS for k, v in kv]
+        if not pairs:
+            continue
+        mine = Ini.load(p)
+        for sec, k, v in pairs:
+            mine.set_default(sec, k, v)
+        mine.save(p)
+        return src
+    return None
+
+
+def write_addon_only_ini(dir_: Path) -> None:
+    r"""For the host64\ folder: load add-ons only, no shaders."""
+    p = dir_ / "ReShade.ini"
+    ini = Ini.load(p)
+    ini.set_default("ADDON", "AddonPath", ".\\")
+    ini.save(p)
+
+
+def write_shader_paths(game_dir: Path) -> None:
+    r"""Search paths and add-on loading, but no technique in any preset.
+
+    For an add-on that schedules its own shaders (standalone-dlssnr renders
+    vort_MotionEffects and DLSS5_AIO_Feed inside its Present callback):
+    ReShade only has to be able to FIND them. Listing them in the preset as
+    well would run both a second time in the ordinary effect pass.
+    """
+    p = game_dir / "ReShade.ini"
+    ini = Ini.load(p)
+    ini.set_default("GENERAL", "EffectSearchPaths", r".\reshade-shaders\Shaders\**")
+    ini.set_default("GENERAL", "TextureSearchPaths", r".\reshade-shaders\Textures\**")
+    ini.set_default("GENERAL", "PresetPath", r".\ReShadePreset.ini")
+    ini.set_default("ADDON", "AddonPath", ".\\")
+    ini.save(p)
+
+
+# Where the DLSS 5 add-on keeps its own switches. ReShade gives an add-on
+# config_get/set_config_value, and they land in ReShade.ini under a section
+# of the add-on's choosing - this is the DLSS 5 one, confirmed three ways:
+# a real ReShade.ini beside DEATHLOOP on the owner's machine carries
+# [RenoDX.DLSS5] NeuralUplift=1, the feeder and the bridge both read that
+# section out of the file themselves ("DLSS 5 add-on settings, read from
+# ReShade.ini"), and the same names are in their binaries.
+ADDON_SECTION = "RenoDX.DLSS5"
+ADDON_SWITCH = "NeuralUplift"
+
+
+def addon_state(game_dir: Path) -> dict:
+    """What the DLSS 5 add-on has written about itself, or {}.
+
+    The diagnosis used to end "open the overlay and read the status", which
+    is the question handed back to the person who asked it. The status is
+    in a file, on their disk, next to the game.
+
+    {"switch": "1"|"0"|None, "keys": {...}, "overlay_seen": bool}. An empty
+    dict means there is no ReShade.ini to read - not that anything is off.
+    """
+    p = Path(game_dir) / "ReShade.ini"
+    if not p.is_file():
+        return {}
+    ini = Ini.load(p)
+    keys = {}
+    for name, kv in ini.sections:
+        if name.lower() == ADDON_SECTION.lower():
+            keys = {k: v for k, v in kv}
+            break
+    seen = ""
+    for name, kv in ini.sections:
+        if name.upper() == "ADDON":
+            seen = next((v for k, v in kv if k.lower() == "overlaycollapsed"), "")
+            break
+    switch = next((v for k, v in keys.items()
+                   if k.lower() == ADDON_SWITCH.lower()), None)
+    return {"switch": switch, "keys": keys, "overlay_seen": bool(seen)}
+
+
+def enable_dlss5_addon(game_dir: Path) -> bool:
+    """Ask the DLSS 5 add-on for the neural pass, in its own section.
+
+    Its default is on, so this matters for one case and it is the silent
+    one: somebody who switched it off in the overlay once. ReShade.ini keeps
+    that per game forever, and an install that says "set up" over it is the
+    quiet failure this project keeps chasing.
+
+    Only when the key is absent - a deliberate off is not overruled, and the
+    diagnosis reads the same key back and says which it is. True when the
+    file was written.
+    """
+    p = Path(game_dir) / "ReShade.ini"
+    ini = Ini.load(p)
+    for name, kv in ini.sections:
+        if name.lower() == ADDON_SECTION.lower():
+            if any(k.lower() == ADDON_SWITCH.lower() for k, _ in kv):
+                return False          # their choice, whichever way it went
+            break
+    ini.set_default(ADDON_SECTION, ADDON_SWITCH, "1")
+    ini.save(p)
+    return True
+
+
+def enable_renodx_dlss_nr(game_dir: Path) -> None:
+    """Ask ShortFuse's renodx-dlss add-on for neural rendering up front.
+
+    The add-on keeps its settings in ReShade.ini under [RENODX-DLSS]; the key
+    is what its overlay toggles. Only set when absent, so a user who turned it
+    off on purpose is not overruled.
+    """
+    p = game_dir / "ReShade.ini"
+    ini = Ini.load(p)
+    ini.set_default("RENODX-DLSS", "NeuralRenderingEnabled", "1")
+    ini.save(p)
+
+
+def write_preset(game_dir: Path, provider: int = 3) -> None:
+    """Put the provider technique ABOVE DLSS5_Feed in the preset."""
+    p = game_dir / "ReShadePreset.ini"
+    ini = Ini.load(p)
+    tech = PROVIDERS.get(provider, (None, None, False))[1]
+    ours = ([tech] if tech else []) + [FEED_TECHNIQUE]
+    for key in ("Techniques", "TechniqueSorting"):
+        if key == "TechniqueSorting" and ini.get("", key) is None:
+            continue
+        rest = [t for t in split_list(ini.get("", key) or "") if t not in ours]
+        ini.set("", key, join_list(ours + rest))
+    ini.set("", "PreprocessorDefinitions",
+            _ensure_define(ini.get("", "PreprocessorDefinitions") or "",
+                           f"DLSS5_MV_PROVIDER={provider}"))
+    ini.save(p)
+
+
+def remove_our_techniques(game_dir: Path, provider: int | None = None) -> None:
+    """Take our techniques out of the preset, leaving the user's alone.
+
+    Only rewrites the file when one of ours is actually in it. Parsing and
+    re-dumping an untouched preset would reformat somebody's own file for no
+    reason - and on the native, bridge and OptiScaler routes we never put
+    anything in it to begin with.
+
+    `provider` is the one the install recorded: only that provider's
+    technique is ours. VORT in particular is a shader people run for their
+    own effects; stripping it from a preset the tool never put it in broke
+    those (review, 1.7.0). With no record (an old manifest) the LumeniteFX
+    techniques are assumed, as every release before 1.7.0 did.
+    """
+    p = game_dir / "ReShadePreset.ini"
+    if not p.is_file():
+        return
+    if provider in PROVIDERS and PROVIDERS[provider][1]:
+        ours = {FEED_TECHNIQUE, PROVIDERS[provider][1]}
+    else:
+        ours = {FEED_TECHNIQUE} | {v[1] for k, v in PROVIDERS.items() if v[1] and k in (3, 4)}
+    ini = Ini.load(p)
+    changed = False
+    for key in ("Techniques", "TechniqueSorting"):
+        raw = ini.get("", key)
+        if raw is None:
+            continue
+        kept = [t for t in split_list(raw) if t not in ours]
+        if len(kept) != len(split_list(raw)):
+            ini.set("", key, join_list(kept))
+            changed = True
+    if changed:
+        ini.save(p)

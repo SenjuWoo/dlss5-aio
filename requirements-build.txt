@@ -1,0 +1,2 @@
+# Build tool only; the app itself uses Python's standard library and Tk.
+PyInstaller==6.22.1

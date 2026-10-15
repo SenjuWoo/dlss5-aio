@@ -1,56 +1,14 @@
-DLSS 5 AIO — START HERE
-================================
+DLSS 5 AIO
 
-You downloaded the all-in-one DLSS 5 pack. Full docs: README.md in this folder
-(or the GitHub repo). This is the 2-minute version.
+Download the current portable ZIP from:
+https://github.com/SenjuWoo/dlss5-aio/releases/latest
 
-WHICH SITUATION ARE YOU IN?
----------------------------
-1) Game ALREADY has DLSS (a nvngx_dlss.dll exists) and is DirectX 12
-   -> Run: 03-DLSS5-Swapper\DLSS5-Swapper-Setup-2.2.7.exe
-      Drop the game folder onto it. Done. (SmartScreen: More info -> Run anyway)
+Extract it, run DLSS5-AIO.exe, and press scan or add a game.
+The runtimes page updates existing compatible NVIDIA/AMD/Intel DLLs.
+Open a game to preview/install a compatible neural-rendering route.
+Restore original or uninstall returns preserved files.
 
-2) Game has NO DLSS and is 64-BIT (D3D11/D3D12/Vulkan)
-   -> Install ReShade WITH ADD-ON SUPPORT from reshade.me against the game exe.
-      Copy dlss5-feed.addon64 next to the exe and the WHOLE reshade-shaders folder
-      from 04-DLSS5-Feeder (feeder shader + ReShade core headers + Deband/Levels/
-      LUT/DisplayDepth/Daltonize/UIMask — self-sufficient).
-      Also copy renodx-dlss5.addon64 + nvngx_dlssnr.dll + nvngx_dlss.dll next to the
-      exe (folders 02 and 01).
-      Motion vectors are REQUIRED: download LumeniteFX Kernel from
-      github.com/umar-afzaal/LumeniteFX (recommended, =3) or another provider —
-      they can't be bundled (licenses). Set DLSS5_MV_PROVIDER in the ReShade overlay
-      on DLSS5_Feed.fx, enable the provider's technique ABOVE DLSS 5 Feed, then
-      DLSS 5 Neural Rendering.
-
-3) Game has NO DLSS and is 32-BIT (or DirectX 9)  <-- the cool part
-   -> Install 32-bit ReShade WITH ADD-ON SUPPORT against the game exe.
-      Copy dlss5-feed.addon32 next to the game exe.
-      Copy the WHOLE reshade-shaders folder (from 04-DLSS5-Feeder).
-      Copy the ENTIRE host64 FOLDER next to the game exe (keep the folder name
-      host64 - all set up already).
-      Motion-vector provider + DLSS5_MV_PROVIDER as in step 2 (download one —
-      none are bundled). There is NO renodx-dlss5.addon32 - on 32-bit the RenoDX
-      add-on stays x64 on the host side.
-      Enable DLSS 5 Feed in-game. A "32-bit DLSS 5 Feeder" window opens - that
-      is the DLSS 5 helper doing the real work. (Proven on Saints Row: The
-      Third, 1440p DLAA.)
-      D3D9 games: translate with dgVoodoo2 first (see 04-DLSS5-Feeder\README.md).
-
-4) Only want the LATEST OFFICIAL DLSS DLLs
-   -> Copy nvngx_dlss.dll / nvngx_dlssg.dll / nvngx_dlssd.dll from
-      01-Official-NVIDIA-DLLs over the game's copies (back up originals first).
-      Streamline games: also update from Streamline-2.13.0.
-
-5) Old-school route (FSR/XeSS conversion, any GPU)
-   -> 05-Legacy-Optiscaler-DLSS-Enabler. ONE approach per game, never mixed
-      with the DLSS 5 tools.
-
-RULES
------
-- RTX 40/50 required for DLSS 5 neural rendering. Windows 10/11 64-bit.
-- Never run NVIDIA Smooth Motion or OptiScaler in the same game.
-- The DLSS 5 add-on is beta: some softness in fast motion is normal.
-- Verify files: sha256sum -c SHA256SUMS.txt
-
-Credits, licenses, links: CREDITS.md / LICENSE.md / README.md
+README.md explains support boundaries, logging and recovery.
+The 2x faster NR model announced October 13 debuts October 16.
+The old numbered component folders and root SHA256SUMS.txt refer to
+legacy v1.4.8, which remains available for rollback.

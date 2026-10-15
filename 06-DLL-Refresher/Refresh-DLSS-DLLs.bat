@@ -6,23 +6,23 @@ cd /d "%~dp0"
 rem Arguments given? Forward them straight to the PowerShell tool and exit (no menu).
 if not "%~1"=="" (
   powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0DLSS-DLL-Refresher.ps1" %*
-  exit /b %errorlevel%
+  goto forwarded
 )
 
 :menu
 cls
 echo ============================================================
 echo   DLSS 5 AIO  -  DLL Refresher
-echo   Brings every DLSS file on this PC up to the pack's
-echo   official version: nvngx_dlss*, Streamline, the DLSS 5
+echo   Brings existing managed DLSS files up to the
+echo   pack version: nvngx_dlss*, Streamline, the DLSS 5
 echo   add-on, the feeder. No injection, no hooks - file swap only.
 echo ============================================================
 set "NRSTATE=included"
 if defined NR set "NRSTATE=SKIPPED"
-set "ONSTATE=skipped (anti-cheat)"
+set "ONSTATE=skipped (name heuristic)"
 if defined ONLINE set "ONSTATE=INCLUDED - ban risk!"
 echo   DLSS 5 runtime (nvngx_dlssnr.dll): %NRSTATE%
-echo   Online games (kernel anti-cheat):  %ONSTATE%
+echo   Known online-title paths:        %ONSTATE%
 echo.
 echo   [1]  Scan only        (dry run, writes nothing)
 echo   [2]  Update all       (keeps the original of every file it replaces)
@@ -34,6 +34,7 @@ echo   [7]  Include online games  (Fortnite, Marvel Rivals, ... - anti-cheat ris
 echo   [8]  Point at the DLL folder  (only if the pack is somewhere else)
 echo   [0]  Exit
 echo.
+set "CHOICE="
 set /p CHOICE=  Choose: 
 
 if "%CHOICE%"=="1" goto scan
@@ -59,7 +60,7 @@ goto menu
 :online
 if defined ONLINE (set "ONLINE=") else (set "ONLINE=-ForceOnline")
 echo.
-set "ONSTATE=skipped (anti-cheat)"
+set "ONSTATE=skipped (name heuristic)"
 if defined ONLINE set "ONSTATE=INCLUDED - ban risk!"
 echo   Online games will be %ONSTATE%.
 timeout /t 2 >nul
@@ -68,6 +69,7 @@ goto menu
 :srcdir
 echo.
 echo   Folder that holds the official DLLs - usually the pack's 01-Official-NVIDIA-DLLs
+set "SRCPATH="
 set /p SRCPATH=  Path (or press Enter to search next to this tool again): 
 if "%SRCPATH%"=="" (set "SRCDIR=") else (set "SRCDIR=-SourceDir "%SRCPATH%"")
 echo.
@@ -92,7 +94,9 @@ goto done
 
 :folder
 echo.
+set "FOLDER="
 set /p FOLDER=  Folder to scan (example: D:\Games): 
+if not defined FOLDER goto menu
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0DLSS-DLL-Refresher.ps1" -Roots "%FOLDER%" %NR% %SRCDIR% %ONLINE%
 goto done
 
@@ -105,3 +109,6 @@ goto done
 echo.
 pause
 goto menu
+
+:forwarded
+exit /b %errorlevel%

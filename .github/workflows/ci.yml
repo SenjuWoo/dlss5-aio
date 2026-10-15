@@ -13,6 +13,36 @@ jobs:
   release-check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Run release checker
         run: python3 scripts/check_release.py
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Application and recovery boundaries
+        run: python -m unittest discover -s app/tests -p 'test_aio_*.py'
+      - name: Runtime trust boundaries
+        run: python -m unittest discover -s app/tests -p 'test_runtimecatalog.py'
+      - name: Game scanning and install guards
+        run: python app/tests/test_scan.py
+      - name: ReShade configuration preservation
+        run: python app/tests/test_reshade_ini.py
+      - name: Legacy refresher on Windows PowerShell 5.1
+        shell: powershell
+        run: ./scripts/Test-Refresher.ps1
+      - name: Legacy refresher on PowerShell 7
+        run: ./scripts/Test-Refresher.ps1
+      - name: Install pinned build tool
+        run: python -m pip install -r requirements-build.txt
+      - name: Build portable app and test fresh package
+        run: ./scripts/Build-Release.ps1 -Python (Get-Command python).Source
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: DLSS5-AIO-win-x64
+          path: dist/*
+          if-no-files-found: error

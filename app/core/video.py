@@ -1,0 +1,1394 @@
+"""A video player set up so films and YouTube go through DLSS 5.
+
+The feeder does not care what draws the frame. A video player that renders
+through Direct3D 11 is, to ReShade and the feed, a game with no depth buffer:
+the colour goes in, LumeniteFX estimates motion from the picture itself, and
+the DLSS 5 add-on runs its neural pass on every frame. Tested 2026-09-02 on
+MPC-HC 2.8.1 with a local file and with a YouTube link opened live through
+yt-dlp: 60 fps, the feed costing about 5% of the frame.
+
+MPC-HC was picked because it is portable (a plain zip, settings in an ini
+next to the exe), ships the MPC Video Renderer (D3D11), and opens a YouTube
+URL directly when yt-dlp.exe sits beside it - no download, no ffmpeg.
+
+Two things have to be put right before the normal install runs:
+
+  - the renderer. MPC-HC starts on EVR (Direct3D 9) by default, and ReShade
+    then attaches to a D3D9 device where the feed cannot work. The ini
+    selects the MPC Video Renderer instead.
+  - the first-run "check for updates?" dialog, which stops playback until
+    someone answers it. The ini answers it.
+
+MPC-HC also bundles an old D3DCompiler_47.dll that rejects the cs_5_1 target
+the neural pass is compiled with; the installer moves that aside for every
+game (see installer.SIDELINE), so it is not handled here.
+"""
+from __future__ import annotations
+
+import zipfile
+from pathlib import Path
+
+from . import child, games, log, net, prefs, sources
+
+PLAYER = "MPC-HC"
+PLAYER_EXE = "mpc-hc64.exe"
+INI = "mpc-hc64.ini"
+YTDLP = "yt-dlp.exe"
+# deno and ffmpeg live in a subfolder: a program started from the player
+# folder itself can load ReShade's dxgi.dll (ffmpeg does, for D3D11 hardware
+# decoding) and overwrite the player's logs with a no-swapchain session.
+# yt-dlp.exe itself stays beside the player: MPC-HC only finds it there
+# (its YDLExePath setting made URL playback fail outright, tested
+# 2026-09-02), and yt-dlp does not touch DXGI.
+TOOLS = "tools"
+PREF_KEY = "video_player_dir"
+
+MPC_API = "https://api.github.com/repos/clsid2/mpc-hc/releases/latest"
+YTDLP_API = "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest"
+
+# MPC-HC reads these from <exe name>.ini when that file exists next to the
+# executable (portable mode). DSVidRen 14 = MPC Video Renderer (D3D11);
+# the enum is in the project's AppSettings.h.
+SETTINGS = {
+    "DSVidRen": "14",
+    "UpdaterAutoCheck": "0",
+    "RememberWindowPos": "1",
+    # The window must stay where the tool parks it beside a screen capture;
+    # auto-zoom resizes it to the video's own size the moment a stream
+    # starts, back over the captured area.
+    "AutoZoom": "0",
+    # 1440p keeps YouTube's VP9/AV1 streams within what one 60 fps neural
+    # pass copes with comfortably; the player's options can raise it.
+    "YDLMaxHeight": "1440",
+}
+
+# The panel hotkeys the finished-install notes point at. F6 is the DLSS 5
+# add-on's neural-rendering toggle (renodx-dlss5 4.6+), Home the overlay.
+# Checked against MPC-HC 2.8.1's own bindings (its [Commands2] table, ids
+# from resource.h): F6 is unbound, F5 = "Save image" (harmless beside the
+# add-on's own F5 screenshot), but Home = ID_PLAY_SEEKSET, "jump to the
+# start" - opening ReShade's overlay restarted the video. That binding is
+# taken away below; the menu still offers the command.
+TOGGLE_KEY = "F6"
+UNBIND_COMMANDS = {"996": "Home (jump to start) - ReShade's overlay key"}
+
+
+def default_dir() -> Path:
+    return Path.home() / "Videos" / "DLSS5 Player"
+
+
+def is_player(folder: Path) -> bool:
+    return (Path(folder) / PLAYER_EXE).is_file()
+
+
+def resolve_player() -> tuple[str, str]:
+    """(tag, url) of the newest MPC-HC x64 portable zip."""
+    data = sources.json_or_html(MPC_API)
+    for a in data.get("assets", []):
+        n = a.get("name", "")
+        if n.lower().endswith("x64.zip"):
+            return data.get("tag_name", "?"), a["browser_download_url"]
+    raise RuntimeError("MPC-HC release has no x64 zip")
+
+
+def resolve_ytdlp() -> tuple[str, str]:
+    """(tag, url) of the newest yt-dlp.exe (64-bit)."""
+    data = sources.json_or_html(YTDLP_API)
+    for a in data.get("assets", []):
+        if a.get("name") == YTDLP:
+            return data.get("tag_name", "?"), a["browser_download_url"]
+    raise RuntimeError("yt-dlp release has no yt-dlp.exe")
+
+
+def tools_dir(folder: Path) -> Path:
+    return Path(folder) / TOOLS
+
+
+def _write_ini(folder: Path) -> None:
+    """Write the portable settings, keeping anything the user changed.
+
+    Byte-level on purpose: MPC-HC writes the file with a UTF-8 BOM and CRLF,
+    and a text-mode rewrite on Windows turns every CRLF into CR CR LF. Each
+    rewrite then doubled the blank lines, and with enough of them MPC-HC
+    crashed the moment a URL was opened (0xc000041d in KERNELBASE, seen
+    2026-09-02). So: read bytes, split on any line ending, drop blank lines,
+    write CRLF with the BOM kept.
+    """
+    p = folder / INI
+    settings = dict(SETTINGS)
+    raw = b""
+    if p.is_file():
+        try:
+            raw = p.read_bytes()
+        except OSError:
+            raw = b""
+    bom = raw.startswith(b"\xef\xbb\xbf")
+    text = (raw[3:] if bom else raw).decode("utf8", "replace")
+    lines = [ln for ln in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+             if ln.strip()]
+    seen: set[str] = set()
+    out: list[str] = []
+    in_settings = False
+    in_commands = False
+    have_section = False
+    for ln in lines:
+        s = ln.strip()
+        if in_commands and s.startswith("CommandMod") and "=" in s:
+            # "CommandModN=<id> <mod> <vk> ..." - drop the key of the
+            # commands that collide with the add-on / ReShade keys.
+            key, _, val = s.partition("=")
+            parts = val.split(" ")
+            if len(parts) >= 3 and parts[0] in UNBIND_COMMANDS and parts[2] != "0":
+                parts[2] = "0"
+                out.append(f"{key}={' '.join(parts)}")
+                continue
+        if s.startswith("[") and s.endswith("]"):
+            in_commands = s.lower() == "[commands2]"
+            if in_settings:
+                # Leaving [Settings]: append the keys it did not have.
+                for k, v in settings.items():
+                    if k not in seen:
+                        out.append(f"{k}={v}")
+            in_settings = s.lower() == "[settings]"
+            have_section = have_section or in_settings
+            out.append(ln)
+            continue
+        if in_settings and "=" in s:
+            k = s.split("=", 1)[0].strip()
+            if k == "YDLExePath":
+                continue            # an earlier build wrote it; it breaks URLs
+            if k in settings:
+                seen.add(k)
+                # The renderer and the update prompt are what make this
+                # work; a user-changed renderer would silently break it.
+                if k in ("DSVidRen", "UpdaterAutoCheck", "AutoZoom"):
+                    out.append(f"{k}={settings[k]}")
+                    continue
+        out.append(ln)
+    if in_settings:
+        for k, v in settings.items():
+            if k not in seen:
+                out.append(f"{k}={v}")
+    if not have_section:
+        out.append("[Settings]")
+        out += [f"{k}={v}" for k, v in settings.items()]
+    data = "\r\n".join(out) + "\r\n"
+    p.write_bytes((b"\xef\xbb\xbf" if bom or not raw else b"") + data.encode("utf8"))
+
+
+def prepare(folder: Path, on_prog=None, on_log=None) -> games.Game:
+    """Put a ready-to-use player in `folder` and return it as a Game.
+
+    Everything lands inside `folder`; nothing is written anywhere else. The
+    player's own files are only extracted when they are not there yet, so
+    a second run keeps the user's playlists and settings.
+    """
+    folder = Path(folder)
+    prog = on_prog or (lambda *_: None)
+    say = on_log or (lambda *_: None)
+    folder.mkdir(parents=True, exist_ok=True)
+
+    def dl(url: str, fname: str) -> Path:
+        def p(done: int, total: int) -> None:
+            pct = int(done * 100 / total) if total else 0
+            prog(pct, f"{fname} - {net.human(done)}"
+                      + (f" / {net.human(total)}" if total else ""))
+        return net.download(url, fname, progress=p)
+
+    if is_player(folder):
+        say(f"      {PLAYER} is already in {folder}")
+    else:
+        tag, url = resolve_player()
+        say(f"      {PLAYER} {tag}")
+        z = dl(url, f"mpc-hc-{tag}-x64.zip")
+        with zipfile.ZipFile(z) as zf:
+            names = zf.namelist()
+            # The zip may or may not wrap everything in one top folder.
+            top = ""
+            if names and "/" in names[0]:
+                first = names[0].split("/", 1)[0] + "/"
+                if all(n.startswith(first) for n in names):
+                    top = first
+            for n in names:
+                if n.endswith("/"):
+                    continue
+                rel = n[len(top):] if top else n
+                if not rel:
+                    continue
+                # The only place here that keeps an archive's own folder
+                # structure, so the only one where a `../` member could
+                # write outside the player folder (#79).
+                try:
+                    dst = net.inside(folder, rel)
+                except net.OutsideError as e:
+                    raise RuntimeError(
+                        f"The {PLAYER} archive contains a path that writes "
+                        f"outside {folder} - refusing it. ({e})") from None
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                with zf.open(n) as src, open(dst, "wb") as out:
+                    out.write(src.read())
+        say(f"      {len(names)} files -> {folder}")
+    if not is_player(folder):
+        raise RuntimeError(f"{PLAYER_EXE} did not appear in {folder}")
+
+    _write_ini(folder)
+    say("      renderer: MPC Video Renderer (D3D11); update prompt off")
+
+    try:
+        tag, url = resolve_ytdlp()
+        src = dl(url, f"yt-dlp-{tag}.exe")
+        dst = folder / YTDLP
+        # An earlier build put it under tools/, where the player never looked.
+        stray = tools_dir(folder) / YTDLP
+        if stray.is_file():
+            stray.unlink()
+        if not dst.is_file() or dst.stat().st_size != src.stat().st_size:
+            dst.write_bytes(src.read_bytes())
+        say(f"      yt-dlp {tag} - YouTube links open straight in the player")
+        try:
+            ensure_deno(folder, on_prog=on_prog, on_log=on_log)
+        except Exception as e:
+            log.write(f"deno: {e}", "warn")
+            say(f"      !! deno could not be fetched ({e}); YouTube may offer "
+                f"fewer formats")
+    except Exception as e:                      # the player still works
+        log.write(f"yt-dlp: {e}", "warn")
+        say(f"      !! yt-dlp could not be fetched ({e}); local files only "
+            f"until it is dropped into the folder by hand")
+
+    try:
+        prefs.set_(PREF_KEY, str(folder))
+    except Exception:
+        pass
+    return as_game(folder)
+
+
+def as_game(folder: Path) -> games.Game:
+    g = games.manual(Path(folder) / PLAYER_EXE)
+    g.name = f"Video player ({PLAYER})"
+    g.kind = "video"
+    g.source = "Video"
+    return g
+
+
+def known() -> games.Game | None:
+    """The player set up earlier, if it is still there."""
+    d = prefs.get(PREF_KEY)
+    if d and is_player(Path(d)):
+        return as_game(Path(d))
+    return None
+
+
+def launch(folder: Path, target: str = "") -> None:
+    """Start the player, optionally on a file or URL."""
+    import subprocess
+    exe = Path(folder) / PLAYER_EXE
+    args = [str(exe)]
+    if target:
+        args += [target, "/play"]
+    child.popen(args, cwd=str(folder))
+
+
+# BtbN publishes a rolling release tagged "latest" whose asset names never
+# change, and a dated autobuild every few hours whose names carry the build
+# hash. /releases/latest returns the DATED one, so looking for the stable
+# name in it found nothing and every video download failed with "ffmpeg
+# build not found on GitHub" (issue #75). The tag is the one to ask for.
+FFMPEG_API = "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/tags/latest"
+FFMPEG_ASSET = "ffmpeg-master-latest-win64-gpl.zip"
+# ...and when the API is out of reach or the names change again, the tag's
+# download URL resolves on its own, the same fallback the ReShade and
+# DLSS5-Reshade-AIO downloads use.
+FFMPEG_DIRECT = ("https://github.com/BtbN/FFmpeg-Builds/releases/download/"
+                 "latest/" + FFMPEG_ASSET)
+FFMPEG = "ffmpeg.exe"
+FFPROBE = "ffprobe.exe"
+DOWNLOADS = "downloads"
+
+# Offline processing: DaniilSokolyuk/video2dlssnr, a pure D3D12 command-line
+# tool that takes raw RGBA frames on stdin and returns them neural-rendered
+# (and optionally DLSS-upscaled) on stdout. The "light" release is the exe
+# plus its NGX forwarder only (a quarter of a megabyte); the NVIDIA runtimes
+# it needs are the ones the feeder install already put beside the player,
+# handed over with --dll-dir. ffmpeg decodes and encodes around it, exactly
+# as the project's own nr_video.py does.
+PROCESSOR_API = "https://api.github.com/repos/DaniilSokolyuk/video2dlssnr/releases/latest"
+PROCESSOR_ASSET = "video2dlssnr_release_light.zip"
+PROCESSOR_LATEST = ("https://github.com/DaniilSokolyuk/video2dlssnr/releases/latest/"
+                    "download/video2dlssnr_release_light.zip")
+PROCESSOR_DIR = "video2dlssnr"
+PROCESSOR_EXE = "video2dlssnr.exe"
+PROCESSED = "processed"
+# NR styles as the tool numbers them.
+STYLES = {0: "default", 1: "natural", 2: "cinematic"}
+SCALES = {"native": 1.0, "2x": 2.0, "4K (3840 wide)": 0.0}
+
+
+def has_processor(folder: Path) -> bool:
+    d = tools_dir(folder) / PROCESSOR_DIR
+    return (d / PROCESSOR_EXE).is_file() and (d / "nvngx.dll_dlssnr.dll").is_file()
+
+
+def ensure_processor(folder: Path, on_prog=None, on_log=None) -> Path:
+    """Put video2dlssnr.exe (+ its forwarder) under tools/, fetch ffmpeg too."""
+    folder = Path(folder)
+    say = on_log or (lambda *_: None)
+    d = tools_dir(folder) / PROCESSOR_DIR
+    if not has_processor(folder):
+        url = PROCESSOR_LATEST
+        try:
+            data = sources.json_or_html(PROCESSOR_API)
+            url = next((a["browser_download_url"] for a in data.get("assets", [])
+                        if a.get("name") == PROCESSOR_ASSET), url)
+        except Exception:
+            pass
+
+        def p(done: int, total: int) -> None:
+            if on_prog:
+                on_prog(int(done * 100 / total) if total else 0,
+                        f"{PROCESSOR_ASSET} - {net.human(done)}")
+        z = net.download(url, PROCESSOR_ASSET, progress=p)
+        d.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(z) as zf:
+            for n in zf.namelist():
+                base = n.rsplit("/", 1)[-1]
+                if base.lower() in (PROCESSOR_EXE, "nvngx.dll_dlssnr.dll"):
+                    with zf.open(n) as src, open(d / base, "wb") as out:
+                        out.write(src.read())
+        say(f"      video2dlssnr -> {d}")
+    if not (has_ffmpeg(folder) and (tools_dir(folder) / FFPROBE).is_file()):
+        # an older tools/ has ffmpeg without ffprobe: fetch the pair again
+        try:
+            (tools_dir(folder) / FFMPEG).unlink()
+        except OSError:
+            pass
+        ensure_ffmpeg(folder, on_prog=on_prog, on_log=on_log)
+    for dll in ("nvngx_dlssnr.dll", "nvngx_dlss.dll"):
+        if not (folder / dll).is_file():
+            raise RuntimeError(f"{dll} is not beside the player - press install on "
+                               f"the player first, the processor uses the same runtimes")
+    return d / PROCESSOR_EXE
+
+
+def _probe(folder: Path, src: Path) -> tuple[int, int, float, int]:
+    import subprocess
+    out = child.run(
+        [str(tools_dir(folder) / FFPROBE), "-v", "error", "-select_streams", "v:0",
+         "-show_entries", "stream=width,height,r_frame_rate,nb_frames",
+         "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1",
+         str(src)], capture_output=True, text=True,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
+    d = dict(line.split("=", 1) for line in out.splitlines() if "=" in line)
+    if "width" not in d:
+        raise RuntimeError("ffprobe could not read the video")
+    num, den = (d.get("r_frame_rate", "30/1").split("/") + ["1"])[:2]
+    fps = float(num) / float(den or 1)
+    frames = int(d.get("nb_frames") or 0)
+    if frames <= 0:
+        try:
+            frames = round(float(d.get("duration") or 0) * fps)
+        except ValueError:
+            frames = 0
+    return int(d["width"]), int(d["height"]), fps, frames
+
+
+def process(folder: Path, src: Path, scale: str = "native", style: int = 0,
+            intensity: float = 1.0, on_prog=None, on_log=None) -> Path:
+    """Neural-render a clip on disk into <folder>/processed/<name>_nr.mp4.
+
+    ffmpeg decodes to raw RGBA, video2dlssnr runs DLSS SR (when scaling) and
+    the neural pass on every frame on the GPU, ffmpeg re-encodes with NVENC
+    and copies the audio across. Progress comes from the tool's NRPROG
+    lines on stderr.
+    """
+    import re
+    import subprocess
+    import threading
+    folder = Path(folder)
+    src = Path(src)
+    say = on_log or (lambda *_: None)
+    prog = on_prog or (lambda *_: None)
+    exe = ensure_processor(folder, on_prog=on_prog, on_log=on_log)
+    ffmpeg = str(tools_dir(folder) / FFMPEG)
+    in_w, in_h, fps, total = _probe(folder, src)
+    factor = SCALES.get(scale, 1.0)
+    if factor == 0.0:                      # 4K: pin the width, keep aspect
+        out_w, out_h = 3840, round(in_h * 3840 / in_w)
+    else:
+        out_w, out_h = round(in_w * factor), round(in_h * factor)
+    out_w -= out_w % 2
+    out_h -= out_h % 2
+    out_dir = folder / PROCESSED
+    out_dir.mkdir(exist_ok=True)
+    dst = out_dir / f"{src.stem}_nr{'' if factor == 1.0 else '_' + str(out_w)}.mp4"
+    say(f"      {in_w}x{in_h} @ {fps:.2f} fps, {total or '?'} frames -> "
+        f"{out_w}x{out_h}, style {STYLES.get(style, style)}, intensity {intensity}")
+    say(f"      saving as {dst}")
+
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    vf = "setparams=colorspace=bt709:color_primaries=bt709:color_trc=bt709,format=rgba"
+    dec = [ffmpeg, "-v", "error", "-i", str(src), "-vf", vf, "-f", "rawvideo", "-"]
+    tool = [str(exe), "--nr-video", "--nr-in", f"{in_w}x{in_h}",
+            "--nr-style", str(int(style)), "--nr-intensity", str(float(intensity)),
+            "--nr-ui-correction", "0", "--nr-motion", "1",
+            "--dll-dir", str(folder)]
+    if (out_w, out_h) != (in_w, in_h):
+        tool += ["--nr-width", str(out_w), "--nr-height", str(out_h)]
+    enc = [ffmpeg, "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgba",
+           "-s", f"{out_w}x{out_h}", "-r", f"{fps}", "-i", "-",
+           "-i", str(src), "-map", "0:v:0", "-map", "1:a:0?",
+           "-c:v", "hevc_nvenc", "-preset", "p5", "-pix_fmt", "yuv420p",
+           "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "-shortest",
+           str(dst)]
+    p1 = child.popen(dec, stdout=subprocess.PIPE, creationflags=flags)
+    p2 = child.popen(tool, stdin=p1.stdout, stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE, cwd=str(exe.parent), creationflags=flags)
+    p1.stdout.close()
+    p3 = child.popen(enc, stdin=p2.stdout, stderr=subprocess.PIPE, creationflags=flags)
+    p2.stdout.close()
+    errs: list[str] = []
+    rx = re.compile(rb"^NRPROG (\d+) ([\d.]+)")
+
+    def pump() -> None:
+        assert p2.stderr is not None
+        for raw in iter(p2.stderr.readline, b""):
+            m = rx.match(raw)
+            if m:
+                n, f = int(m.group(1)), float(m.group(2))
+                pct = int(n * 100 / total) if total else 0
+                left = (total - n) / f if (total and f > 0) else 0
+                prog(min(pct, 99), f"frame {n}/{total or '?'} at {f:.1f} fps"
+                                   + (f", {int(left // 60)}:{int(left % 60):02d} left"
+                                      if left else ""))
+            else:
+                line = raw.decode("utf8", "replace").strip()
+                if line and not line.startswith("done:"):
+                    errs.append(line)
+    t = threading.Thread(target=pump, daemon=True)
+    t.start()
+    rc3 = p3.wait()
+    p2.wait()
+    p1.wait()
+    t.join(timeout=5)
+    enc_err = (p3.stderr.read().decode("utf8", "replace").strip() if p3.stderr else "")
+    if rc3 != 0 or p2.returncode not in (0, None) or not dst.is_file():
+        raise RuntimeError("processing failed: " + " | ".join((errs[-3:] + [enc_err])[-3:])
+                           or "no output written")
+    prog(100, dst.name)
+    return dst
+
+
+
+DENO_API = "https://api.github.com/repos/denoland/deno/releases/latest"
+DENO_ASSET = "deno-x86_64-pc-windows-msvc.zip"
+DENO = "deno.exe"
+YTDLP_CONF = "yt-dlp.conf"
+
+
+def ensure_deno(folder: Path, on_prog=None, on_log=None) -> Path | None:
+    """yt-dlp (2026) needs a JavaScript runtime to read YouTube's player.
+
+    Without one it warns and most formats go missing - the player still
+    streams something, but downloads fail with "requested format is not
+    available". deno is the runtime yt-dlp enables by default; it goes into
+    the player folder and yt-dlp.conf (read from the exe's own folder) points
+    at it, so both the player's streaming and our downloads use it.
+    """
+    folder = Path(folder)
+    tools_dir(folder).mkdir(exist_ok=True)
+    dst = tools_dir(folder) / DENO
+    say = on_log or (lambda *_: None)
+    if not dst.is_file():
+        data = sources.json_or_html(DENO_API)
+        url = next((a["browser_download_url"] for a in data.get("assets", [])
+                    if a.get("name") == DENO_ASSET), None)
+        if not url:
+            return None
+
+        def p(done: int, total: int) -> None:
+            if on_prog:
+                on_prog(int(done * 100 / total) if total else 0,
+                        f"{DENO_ASSET} - {net.human(done)}"
+                        + (f" / {net.human(total)}" if total else ""))
+        z = net.download(url, f"deno-{data.get('tag_name', '')}.zip", progress=p)
+        with zipfile.ZipFile(z) as zf:
+            member = next((n for n in zf.namelist() if n.endswith("deno.exe")), None)
+            if not member:
+                return None
+            with zf.open(member) as src, open(dst, "wb") as out:
+                out.write(src.read())
+        say(f"      deno {data.get('tag_name', '')} - JavaScript runtime for yt-dlp")
+    conf = folder / YTDLP_CONF           # read from yt-dlp.exe's own folder
+    stray = tools_dir(folder) / YTDLP_CONF
+    if stray.is_file():
+        stray.unlink()
+    # yt-dlp splits the config file like a POSIX shell: backslashes escape
+    # and spaces separate, so the path goes quoted with forward slashes.
+    line = f'--js-runtimes "deno:{dst.as_posix()}"'
+    try:
+        cur = conf.read_text(encoding="utf8") if conf.is_file() else ""
+    except OSError:
+        cur = ""
+    if line not in cur:
+        keep = [ln for ln in cur.splitlines() if not ln.startswith("--js-runtimes")]
+        conf.write_text("\n".join(keep + [line]) + "\n", encoding="utf8")
+    return dst
+
+
+def looks_like_url(text: str) -> bool:
+    t = (text or "").strip().lower()
+    return t.startswith(("http://", "https://")) and " " not in t and len(t) < 2048
+
+
+def clipboard_url(root) -> str:
+    """A link sitting on the clipboard, or "". Never raises."""
+    try:
+        t = root.clipboard_get()
+    except Exception:
+        return ""
+    return t.strip() if looks_like_url(t) else ""
+
+
+def play_url(folder: Path, url: str) -> None:
+    """Open a link straight in the player (yt-dlp resolves the stream)."""
+    if not looks_like_url(url):
+        raise ValueError("that is not a link")
+    launch(folder, url.strip())
+
+
+def has_ffmpeg(folder: Path) -> bool:
+    return (tools_dir(folder) / FFMPEG).is_file()
+
+
+def ensure_ffmpeg(folder: Path, on_prog=None, on_log=None) -> Path:
+    """Fetch ffmpeg.exe once; yt-dlp needs it to merge video and audio.
+
+    YouTube offers no combined file any more, so every download is a merge.
+    The build is 170 MB and is fetched on the first download, not with the
+    player, so that people who only stream never pay for it.
+    """
+    folder = tools_dir(folder)
+    folder.mkdir(exist_ok=True)
+    dst = folder / FFMPEG
+    if dst.is_file():
+        return dst
+    say = on_log or (lambda *_: None)
+    url = None
+    try:
+        assets = sources.json_or_html(FFMPEG_API).get("assets", [])
+        url = next((a["browser_download_url"] for a in assets
+                    if a.get("name") == FFMPEG_ASSET), None)
+        if not url:
+            # The exact name has moved before. Any static 64-bit Windows GPL
+            # build in that release will do: not -shared (it needs its DLLs
+            # beside it), not lgpl (no NVENC), not arm64.
+            url = next((a["browser_download_url"] for a in assets
+                        if (n := a.get("name", "").lower()).endswith(".zip")
+                        and "win64" in n and "gpl" in n
+                        and "lgpl" not in n and "shared" not in n), None)
+    except Exception as e:
+        say(f"      the ffmpeg release listing did not answer ({e}); "
+            f"using the direct download")
+    url = url or FFMPEG_DIRECT
+
+    def p(done: int, total: int) -> None:
+        if on_prog:
+            on_prog(int(done * 100 / total) if total else 0,
+                    f"{FFMPEG_ASSET} - {net.human(done)}"
+                    + (f" / {net.human(total)}" if total else ""))
+    z = net.download(url, FFMPEG_ASSET, progress=p)
+    with zipfile.ZipFile(z) as zf:
+        for exe_name in (FFMPEG, FFPROBE):
+            member = next((n for n in zf.namelist()
+                           if n.endswith("/bin/" + exe_name)), None)
+            if not member:
+                raise RuntimeError(f"{exe_name} not in the zip")
+            with zf.open(member) as src, open(folder / exe_name, "wb") as out:
+                out.write(src.read())
+    say(f"      ffmpeg + ffprobe -> {folder}")
+    return dst
+
+
+def download(folder: Path, url: str, on_prog=None, on_log=None,
+             full_quality: bool = False) -> Path:
+    """Save a link as a file in <folder>/downloads and return the path.
+
+    yt-dlp does the work; its progress lines are turned into the tool's
+    progress bar. The file is then opened in the player by the caller.
+    """
+    folder = Path(folder)
+    if not looks_like_url(url):
+        raise ValueError("that is not a link")
+    exe = folder / YTDLP
+    if not exe.is_file():
+        raise RuntimeError("yt-dlp.exe is missing from the player folder - run "
+                           "'set up the video player' again")
+    out_dir = folder / DOWNLOADS
+    out_dir.mkdir(exist_ok=True)
+    say = on_log or (lambda *_: None)
+    prog = on_prog or (lambda *_: None)
+    import re
+    import subprocess
+    # YouTube stopped offering combined video+audio files (checked
+    # 2026-09-02: every format is video-only or audio-only), so a download
+    # is always a merge and ffmpeg is not optional.
+    if not has_ffmpeg(folder):
+        raise RuntimeError("ffmpeg.exe is missing from the player folder; the "
+                           "download button fetches it once")
+    cap = 2160 if full_quality else 1440
+    fmt = f"bv*[ext=mp4][height<={cap}]+ba[ext=m4a]/bv*[height<={cap}]+ba/b"
+    args = [str(exe), "--no-playlist", "--newline", "-f", fmt,
+            "--merge-output-format", "mp4",
+            "-o", str(out_dir / "%(title).80s [%(id)s].%(ext)s"),
+            "--print", "after_move:filepath", "--no-simulate", "--no-quiet",
+            "--progress"]
+    args += ["--ffmpeg-location", str(tools_dir(folder))]
+    args.append(url.strip())
+    say(f"      yt-dlp: best video up to {cap}p + audio, merged to mp4")
+    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    proc = child.popen(args, cwd=str(tools_dir(folder)), stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT, text=True,
+                            encoding="utf8", errors="replace",
+                            creationflags=creationflags)
+    result = None
+    tail: list[str] = []
+    assert proc.stdout is not None
+    for line in proc.stdout:
+        line = line.rstrip()
+        if not line:
+            continue
+        tail.append(line)
+        tail = tail[-8:]
+        m = re.search(r"\[download\]\s+([\d.]+)%(.*)", line)
+        if m:
+            prog(int(float(m.group(1))), "downloading" + m.group(2)[:60])
+            continue
+        if line.startswith("[") and "ERROR" not in line:
+            say(f"      {line[:120]}")
+        elif "ERROR" in line:
+            say(f"      !! {line[:160]}")
+        else:
+            candidate = Path(line)
+            if candidate.suffix and str(out_dir).lower() in line.lower():
+                result = candidate
+    proc.wait()
+    if proc.returncode != 0 or result is None or not result.is_file():
+        raise RuntimeError("yt-dlp failed: " + " | ".join(tail[-3:]))
+    prog(100, result.name)
+    return result
+
+
+# Webcam: the player's own "Open Device" needs a camera picked in its
+# options first, so ffmpeg (already in tools/) reads the camera through
+# DirectShow and hands it to the player as a local MPEG-TS stream over UDP.
+# Half a second of latency, and the feed sees it like any other video.
+WEBCAM_PORT = 47321
+WEBCAM_URL = f"udp://@127.0.0.1:{WEBCAM_PORT}"
+_webcam_proc = None
+
+
+def list_cameras(folder: Path) -> list[str]:
+    """DirectShow video devices, as ffmpeg names them."""
+    import re
+    import subprocess
+    ff = tools_dir(folder) / FFMPEG
+    if not ff.is_file():
+        return []
+    try:
+        out = child.run([str(ff), "-hide_banner", "-list_devices", "true",
+                              "-f", "dshow", "-i", "dummy"],
+                             capture_output=True, text=True, encoding="utf8",
+                             errors="replace", timeout=20,
+                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except Exception:
+        return []
+    cams: list[str] = []
+    for line in ((out.stderr or "") + "\n" + (out.stdout or "")).splitlines():
+        m = re.search(r'"([^"]+)"\s+\(video\)', line)
+        if m and m.group(1) not in cams:
+            cams.append(m.group(1))
+    return cams
+
+
+def start_webcam(folder: Path, camera: str, size: str = "1280x720", fps: int = 30):
+    """Start the camera stream and the player on it. Returns the ffmpeg process."""
+    import subprocess
+    global _webcam_proc
+    stop_webcam()
+    ff = tools_dir(folder) / FFMPEG
+    if not ff.is_file():
+        raise RuntimeError("ffmpeg is not in the player's tools folder yet - "
+                           "run one download first, or press 'set up the video "
+                           "player' again")
+    def command(requested: bool) -> list[str]:
+        cam_opts = (["-video_size", size, "-framerate", str(fps)] if requested else [])
+        return ([str(ff), "-hide_banner", "-loglevel", "error", "-f", "dshow",
+                 "-rtbufsize", "64M"] + cam_opts +
+                ["-i", f"video={camera}",
+                 "-vcodec", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
+                 "-g", str(fps), "-pix_fmt", "yuv420p", "-f", "mpegts",
+                 f"udp://127.0.0.1:{WEBCAM_PORT}?pkt_size=1316"])
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    _webcam_proc = child.popen(command(True), cwd=str(tools_dir(folder)),
+                                    creationflags=flags)
+    import time
+    time.sleep(2.0)
+    if _webcam_proc.poll() is not None:
+        # The size/rate was refused: try the camera's own default.
+        _webcam_proc = child.popen(command(False), cwd=str(tools_dir(folder)),
+                                        creationflags=flags)
+        time.sleep(2.0)
+        if _webcam_proc.poll() is not None:
+            _webcam_proc = None
+            raise RuntimeError(f"ffmpeg could not open the camera '{camera}' - is "
+                               f"another app using it?")
+    launch(folder, WEBCAM_URL)
+    return _webcam_proc
+
+
+def capture_frames_sent() -> int:
+    """Frames the window capture has pushed so far (0 for the screen method)."""
+    return _window_feed.frames if _window_feed is not None else 0
+
+
+def feed_frames_since(folder: Path, t0: float) -> tuple[int, bool]:
+    """(frames delivered, motion vectors alive) logged after wall time t0.
+
+    The feed log carries hh:mm:ss.mmm stamps only, so the day is taken from
+    t0, and a stamp more than half a day away from t0 is moved to the
+    neighbouring day - a stream started just before midnight otherwise read
+    every line as tomorrow's.
+    """
+    import datetime
+    import re
+    p = Path(folder) / "dlss5-feed.log"
+    try:
+        text = p.read_text(encoding="utf8", errors="replace")
+    except OSError:
+        return 0, False
+    day = datetime.datetime.fromtimestamp(t0).date()
+    frames, mv = 0, False
+    for line in text.splitlines():
+        m = re.match(r"(\d\d):(\d\d):(\d\d)\.(\d+)\s+(.*)", line)
+        if not m:
+            continue
+        stamp = datetime.datetime.combine(day, datetime.time(
+            int(m.group(1)), int(m.group(2)), int(m.group(3)),
+            int(m.group(4)[:3].ljust(3, "0")) * 1000)).timestamp()
+        if stamp - t0 > 43200:
+            stamp -= 86400
+        elif t0 - stamp > 43200:
+            stamp += 86400
+        if stamp < t0 - 1:
+            continue
+        rest = m.group(5)
+        fm = re.search(r"frame (\d+) delivered", rest)
+        if fm:
+            frames = max(frames, int(fm.group(1)))
+        pm = re.search(r"(\d+)% non-zero", rest)
+        if "MV probe" in rest and pm and int(pm.group(1)) > 0:
+            mv = True
+    return frames, mv
+
+
+# Screen and window capture: anything on the desktop through DLSS 5 - a
+# browser playing a video, a stream, an emulator, a game nothing should be
+# injected into. Same pipe as the webcam: frames are encoded and handed to
+# the player as a local MPEG-TS stream over UDP. Two methods:
+#
+#   screen N  - part of the desktop through the Desktop Duplication API on
+#               the GPU (ddagrab + NVENC). The player is itself a window on
+#               that desktop, so it must sit outside the captured area or
+#               the capture shows the player showing the capture: with two
+#               monitors the player goes to the other one, with one the
+#               left 62% is captured and the player is parked on the right.
+#   window    - the window itself, through PrintWindow(PW_RENDERFULLCONTENT):
+#               the window's own composited content, hardware-accelerated
+#               windows included (a browser, Discord), and it keeps coming
+#               while other windows cover it - so the player can go
+#               fullscreen on top of the source. Frames go to ffmpeg over a
+#               pipe as raw BGRA and NVENC encodes them; about 80 frames a
+#               second at 1080p on the capture side, capped at the chosen
+#               rate. GDI screen capture (gdigrab) shows those windows as
+#               black, which is why ffmpeg's own window capture is not used.
+SCREEN_PREFIX = "screen "
+WINDOW_PREFIX = "window: "
+SPLIT = 0.62                    # share of the width that is captured
+_windows_by_title: dict = {}    # title -> hwnd, from the last list_screens()
+
+
+def _user32():
+    import ctypes
+    u = ctypes.windll.user32
+    try:
+        u.SetProcessDPIAware()
+    except Exception:
+        pass
+    return u
+
+
+def monitors() -> list[tuple[int, int, int, int]]:
+    """(left, top, right, bottom) of every monitor, primary first."""
+    import ctypes
+    import ctypes.wintypes as w
+    u = _user32()
+    out: list[tuple[int, int, int, int]] = []
+    proc = ctypes.WINFUNCTYPE(ctypes.c_int, w.HMONITOR, w.HDC,
+                              ctypes.POINTER(w.RECT), w.LPARAM)
+
+    def cb(_hm, _hdc, lprc, _lp):
+        r = lprc.contents
+        out.append((r.left, r.top, r.right, r.bottom))
+        return 1
+    try:
+        u.EnumDisplayMonitors(None, None, proc(cb), 0)
+    except Exception:
+        pass
+    out.sort(key=lambda r: (r[0] != 0 or r[1] != 0, r[0], r[1]))
+    return out or [(0, 0, 1920, 1080)]
+
+
+def list_screens() -> list[str]:
+    """Every monitor, then every visible window big enough to matter."""
+    import ctypes
+    import ctypes.wintypes as w
+    out: list[str] = []
+    _windows_by_title.clear()
+    try:
+        u = _user32()
+        out += [f"{SCREEN_PREFIX}{i + 1}" for i in range(len(monitors()))]
+        titles: list[str] = []
+
+        @ctypes.WINFUNCTYPE(ctypes.c_bool, w.HWND, w.LPARAM)
+        def cb(h, _l):
+            if u.IsWindowVisible(h):
+                ln = u.GetWindowTextLengthW(h)
+                if ln:
+                    b = ctypes.create_unicode_buffer(ln + 1)
+                    u.GetWindowTextW(h, b, ln + 1)
+                    r = w.RECT()
+                    u.GetWindowRect(h, ctypes.byref(r))
+                    if r.right - r.left >= 320 and r.bottom - r.top >= 200 \
+                            and b.value not in titles \
+                            and not b.value.startswith("DLSS 5 AIO"):
+                        titles.append(b.value)
+                        _windows_by_title[b.value] = int(h)
+            return True
+        u.EnumWindows(cb, 0)
+        out += [WINDOW_PREFIX + t for t in titles]
+    except Exception:
+        pass
+    return out or [SCREEN_PREFIX + "1"]
+
+
+def split_layout(mon: tuple[int, int, int, int]) -> tuple[tuple[int, int, int, int], tuple[int, int, int, int]]:
+    """((x, y, w, h) captured, (x, y, w, h) for the player) on one monitor.
+
+    Even numbers throughout - the encoder wants them - and the split lands on
+    the captured side's edge, so the player never overlaps the capture.
+    """
+    left, top, right, bottom = mon
+    width, height = right - left, bottom - top
+    cw = int(width * SPLIT) & ~1
+    ch = height & ~1
+    return (left, top, cw, ch), (left + cw, top, width - cw, height)
+
+
+def _rect(hwnd) -> tuple[int, int, int, int]:
+    import ctypes
+    import ctypes.wintypes as w
+    r = w.RECT()
+    _user32().GetWindowRect(hwnd, ctypes.byref(r))
+    return (r.left, r.top, r.right - r.left, r.bottom - r.top)
+
+
+def _monitor_of(rect) -> tuple[int, int, int, int]:
+    x, y, wd, ht = rect
+    cx, cy = x + wd // 2, y + ht // 2
+    for m in monitors():
+        if m[0] <= cx < m[2] and m[1] <= cy < m[3]:
+            return m
+    return monitors()[0]
+
+
+def _move(hwnd, rect, topmost: bool = False) -> None:
+    """Restore and place a window; topmost keeps the player above the source."""
+    import ctypes
+    import ctypes.wintypes as w
+    u = _user32()
+    SW_RESTORE, SWP_SHOWWINDOW = 9, 0x0040
+    x, y, wd, ht = rect
+    try:
+        # Without argtypes a -1 (HWND_TOPMOST) is passed as a 32-bit int and
+        # Windows sees an invalid handle: the call fails and nothing moves.
+        u.SetWindowPos.argtypes = [w.HWND, w.HWND, ctypes.c_int, ctypes.c_int,
+                                   ctypes.c_int, ctypes.c_int, ctypes.c_uint]
+        u.ShowWindow(w.HWND(hwnd), SW_RESTORE)
+        u.SetWindowPos(w.HWND(hwnd), w.HWND(-1) if topmost else w.HWND(0),
+                       x, y, wd, ht, SWP_SHOWWINDOW)
+    except Exception:
+        pass
+
+
+def _player_hwnd(pid: int, timeout: float = 8.0):
+    """The player's main window once it exists, or None.
+
+    MPC-HC runs as a single instance: a second start hands the URL to the
+    running one and exits, so the pid we launched may own no window. After
+    a few seconds the window is looked up by its class instead.
+    """
+    import ctypes
+    import ctypes.wintypes as w
+    import time
+    u = _user32()
+    deadline = time.monotonic() + timeout
+    by_class_after = time.monotonic() + 3.0
+    while time.monotonic() < deadline:
+        if time.monotonic() > by_class_after:
+            h = u.FindWindowW(WINDOW_CLASS, None)
+            if h:
+                return int(h)
+        best = None
+
+        @ctypes.WINFUNCTYPE(ctypes.c_bool, w.HWND, w.LPARAM)
+        def cb(h, _l):
+            nonlocal best
+            p = w.DWORD()
+            u.GetWindowThreadProcessId(h, ctypes.byref(p))
+            if p.value == pid and u.IsWindowVisible(h):
+                x, y, wd, ht = _rect(h)
+                if best is None or wd * ht > best[1]:
+                    best = (int(h), wd * ht)
+            return True
+        u.EnumWindows(cb, 0)
+        if best and best[1] > 200 * 200:
+            return best[0]
+        time.sleep(0.25)
+    return None
+
+
+def capture_command(ff: Path, target: str, fps: int = 30, gpu: bool = True,
+                    region: tuple[int, int, int, int] | None = None,
+                    output_idx: int = 0) -> list[str]:
+    """The ffmpeg command line that captures `target` into the player's UDP pipe.
+
+    `region` is (x, y, w, h) in desktop coordinates, captured through the
+    Desktop Duplication API on the GPU (ddagrab's own offset and size, no
+    CPU copy). `gpu` False is the fallback when NVENC or Desktop Duplication
+    refuses: GDI capture of the same region and libx264 - slower, always
+    works, black for hardware-accelerated windows.
+    """
+    base = [str(ff), "-hide_banner", "-loglevel", "error"]
+    out = ["-g", str(fps), "-f", "mpegts", f"udp://127.0.0.1:{WEBCAM_PORT}?pkt_size=1316"]
+    x264 = ["-vcodec", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
+            "-pix_fmt", "yuv420p"]
+    if not gpu:
+        cmd = base + ["-f", "gdigrab", "-framerate", str(min(fps, 30))]
+        if region is None:
+            # gdigrab knows no monitor index: the whole virtual desktop, all
+            # monitors and the parked player included. Cut this monitor out.
+            mons = monitors()
+            m = mons[min(output_idx, len(mons) - 1)]
+            ox = min(r[0] for r in mons)
+            oy = min(r[1] for r in mons)
+            region = (m[0] - ox, m[1] - oy, (m[2] - m[0]) & ~1, (m[3] - m[1]) & ~1)
+        x, y, wd, ht = region
+        cmd += ["-offset_x", str(x), "-offset_y", str(y), "-video_size", f"{wd}x{ht}"]
+        return cmd + ["-i", "desktop"] + x264 + out
+    grab = f"ddagrab=output_idx={output_idx}:framerate={fps}"
+    if region:
+        x, y, wd, ht = region
+        grab += f":offset_x={x}:offset_y={y}:video_size={wd}x{ht}"
+    return base + ["-init_hw_device", "d3d11va", "-filter_complex", grab,
+                   "-c:v", "h264_nvenc", "-preset", "p1", "-tune", "ll",
+                   "-zerolatency", "1"] + out
+
+
+def plan_capture(target: str) -> tuple[tuple[int, int, int, int] | None, int,
+                                       tuple[int, int, int, int] | None, bool]:
+    """(region, output_idx, player_rect, other_monitor) for a target.
+
+    region None = the whole monitor. player_rect is where the player is
+    parked; other_monitor says that rect is a different monitor (maximise
+    there) rather than a strip beside the capture.
+    """
+    mons = monitors()
+    try:
+        idx = max(0, int(target[len(SCREEN_PREFIX):]) - 1)
+    except ValueError:
+        idx = 0
+    idx = min(idx, len(mons) - 1)
+    mon = mons[idx]
+    if len(mons) > 1:
+        other = mons[(idx + 1) % len(mons)]
+        return None, idx, (other[0], other[1], other[2] - other[0], other[3] - other[1]), True
+    cap, park = split_layout(mon)
+    return (cap[0] - mon[0], cap[1] - mon[1], cap[2], cap[3]), idx, park, False
+
+
+class _BMI(__import__("ctypes").Structure):
+    import ctypes as _c
+    _fields_ = [("biSize", _c.c_uint32), ("biWidth", _c.c_int32), ("biHeight", _c.c_int32),
+                ("biPlanes", _c.c_uint16), ("biBitCount", _c.c_uint16),
+                ("biCompression", _c.c_uint32), ("biSizeImage", _c.c_uint32),
+                ("biXPelsPerMeter", _c.c_int32), ("biYPelsPerMeter", _c.c_int32),
+                ("biClrUsed", _c.c_uint32), ("biClrImportant", _c.c_uint32),
+                ("bmiColors", _c.c_uint32 * 3)]
+
+
+PW_RENDERFULLCONTENT = 0x2
+
+
+def grab_window(hwnd) -> tuple[int, int, bytes]:
+    """One frame of the window's own content as (width, height, BGRA bytes).
+
+    PrintWindow with PW_RENDERFULLCONTENT asks DWM for the window's
+    composited surface, so covered and hardware-accelerated windows come
+    out as they are; without that flag a covered browser is black.
+    """
+    import ctypes
+    u = _user32()
+    g = ctypes.windll.gdi32
+    x, y, wd, ht = _rect(hwnd)
+    wd &= ~1
+    ht &= ~1
+    if wd < 2 or ht < 2:
+        return 0, 0, b""
+    hdc = u.GetDC(0)
+    mem = g.CreateCompatibleDC(hdc)
+    bmi = _BMI()
+    bmi.biSize = 44
+    bmi.biWidth = wd
+    bmi.biHeight = -ht
+    bmi.biPlanes = 1
+    bmi.biBitCount = 32
+    bits = ctypes.c_void_p()
+    hbm = g.CreateDIBSection(hdc, ctypes.byref(bmi), 0, ctypes.byref(bits), None, 0)
+    if not hbm or not bits.value:
+        g.DeleteDC(mem)
+        u.ReleaseDC(0, hdc)
+        return 0, 0, b""
+    old = g.SelectObject(mem, hbm)
+    try:
+        u.PrintWindow(hwnd, mem, PW_RENDERFULLCONTENT)
+        buf = ctypes.string_at(bits, wd * ht * 4)
+    finally:
+        g.SelectObject(mem, old)
+        g.DeleteObject(hbm)
+        g.DeleteDC(mem)
+        u.ReleaseDC(0, hdc)
+    return wd, ht, buf
+
+
+def window_pipe_command(ff: Path, width: int, height: int, fps: int, gpu: bool = True) -> list[str]:
+    """ffmpeg reading raw BGRA frames on stdin and streaming them to the player."""
+    base = [str(ff), "-hide_banner", "-loglevel", "error", "-f", "rawvideo",
+            "-pix_fmt", "bgra", "-s", f"{width}x{height}", "-r", str(fps), "-i", "-"]
+    enc = (["-c:v", "h264_nvenc", "-preset", "p1", "-tune", "ll", "-zerolatency", "1"]
+           if gpu else ["-vcodec", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
+                        "-pix_fmt", "yuv420p"])
+    return base + enc + ["-g", str(fps), "-f", "mpegts",
+                         f"udp://127.0.0.1:{WEBCAM_PORT}?pkt_size=1316"]
+
+
+class _WindowFeed:
+    """Captures one window at `fps` and pumps it through ffmpeg to the player.
+
+    Runs on its own thread. A window that is minimised keeps sending its
+    last frame; a window that changes size restarts the encoder at the new
+    size; a window that closes ends the feed.
+    """
+
+    def __init__(self, ff: Path, hwnd: int, fps: int, log=None):
+        import threading
+        self.ff, self.hwnd, self.fps = ff, hwnd, max(1, min(fps, 60))
+        self.log = log or (lambda *_: None)
+        self.proc = None
+        self.frames = 0
+        self.gpu = True
+        self.since_open = 0
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def start(self) -> "_WindowFeed":
+        self._thread.start()
+        return self
+
+    def alive(self) -> bool:
+        return self._thread.is_alive()
+
+    def stop(self) -> None:
+        self._stop.set()
+        p = self.proc
+        if p is not None:
+            try:
+                p.stdin.close()
+            except Exception:
+                pass
+            try:
+                p.kill()
+                p.wait(timeout=3)
+            except Exception:
+                pass
+        self.proc = None
+
+    def _open(self, wd: int, ht: int, gpu: bool = True):
+        import subprocess
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        self.gpu = gpu
+        self.since_open = 0
+        try:
+            return child.popen(window_pipe_command(self.ff, wd, ht, self.fps, gpu),
+                                    stdin=subprocess.PIPE, cwd=str(self.ff.parent),
+                                    creationflags=flags)
+        except OSError:
+            return None
+
+    def _run(self) -> None:
+        import time
+        u = _user32()
+        interval = 1.0 / self.fps
+        wd = ht = 0
+        last = b""
+        nxt = time.monotonic()
+        while not self._stop.is_set():
+            if not u.IsWindow(self.hwnd):
+                self.log("      the captured window closed - feed ended")
+                break
+            if u.IsIconic(self.hwnd):
+                buf, w2, h2 = last, wd, ht
+            else:
+                w2, h2, buf = grab_window(self.hwnd)
+            if w2 and (w2, h2) != (wd, ht):
+                if self.proc is not None:
+                    self.log(f"      window resized to {w2}x{h2} - restarting the encoder")
+                    self.stop_encoder()
+                wd, ht = w2, h2
+                self.proc = self._open(wd, ht)
+                if self.proc is None:
+                    self.log("      ffmpeg refused the raw pipe - feed ended")
+                    break
+            p = self.proc
+            if buf and p is not None:
+                try:
+                    p.stdin.write(buf)
+                    self.frames += 1
+                    self.since_open += 1
+                    last = buf
+                except (BrokenPipeError, OSError, ValueError):
+                    # ValueError: stdin already closed by stop() on another thread
+                    if self._stop.is_set():
+                        break
+                    if self.gpu and self.since_open < self.fps:
+                        # ffmpeg opens the encoder at the first frame: NVENC
+                        # refusing it shows up here, not at Popen
+                        self.log("      NVENC refused the raw pipe - using the CPU encoder")
+                        self.stop_encoder()
+                        self.proc = self._open(wd, ht, gpu=False)
+                        if self.proc is None:
+                            self.log("      ffmpeg refused the raw pipe - feed ended")
+                            break
+                        continue
+                    self.log("      ffmpeg went away - feed ended")
+                    break
+            nxt += interval
+            delay = nxt - time.monotonic()
+            if delay > 0:
+                time.sleep(delay)
+            else:
+                nxt = time.monotonic()
+        self.stop_encoder()
+
+    def stop_encoder(self) -> None:
+        p = self.proc
+        self.proc = None
+        if p is not None:
+            try:
+                p.stdin.close()
+                p.wait(timeout=3)
+            except Exception:
+                try:
+                    p.kill()
+                except Exception:
+                    pass
+
+
+_window_feed: "_WindowFeed | None" = None
+
+
+def start_screen(folder: Path, target: str, fps: int = 30):
+    """Start capturing a screen or a window and the player on it.
+
+    Returns the ffmpeg process. The player is parked where the capture
+    cannot see it (the other monitor, or the right-hand strip of this one).
+    """
+    import subprocess
+    import threading
+    import time
+    global _webcam_proc
+    stop_webcam()
+    ff = tools_dir(folder) / FFMPEG
+    if not ff.is_file():
+        raise RuntimeError("ffmpeg is not in the player's tools folder yet - "
+                           "run one download first, or press 'set up the video "
+                           "player' again")
+    global _window_feed
+    if target.startswith(WINDOW_PREFIX):
+        hwnd = _windows_by_title.get(target[len(WINDOW_PREFIX):])
+        if not hwnd or not _user32().IsWindow(hwnd):
+            raise RuntimeError("that window is gone - press refresh and pick it again")
+        if _user32().IsIconic(hwnd):
+            _user32().ShowWindow(hwnd, 9)               # SW_RESTORE: a minimised window has no surface
+        _window_feed = _WindowFeed(ff, hwnd, fps).start()
+        time.sleep(2.0)
+        if not _window_feed.alive():
+            _window_feed = None
+            raise RuntimeError(f"could not capture '{target}'")
+        exe = Path(folder) / PLAYER_EXE
+        child.popen([str(exe), WEBCAM_URL, "/play"], cwd=str(folder))
+        _watch_player()
+        return None
+    region, idx, park, other = plan_capture(target)
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    for gpu in (True, False):
+        _webcam_proc = child.popen(capture_command(ff, target, fps, gpu, region, idx),
+                                        cwd=str(tools_dir(folder)), creationflags=flags)
+        time.sleep(2.0)
+        if _webcam_proc.poll() is None:
+            break
+    else:
+        _webcam_proc = None
+        raise RuntimeError(f"ffmpeg could not capture '{target}' - a window has to be "
+                           f"open and not minimised; a screen number has to exist")
+    exe = Path(folder) / PLAYER_EXE
+    player = child.popen([str(exe), WEBCAM_URL, "/play"], cwd=str(folder))
+
+    def park_player() -> None:
+        h = _player_hwnd(player.pid)
+        if not (h and park):
+            return
+        if other:
+            # The other monitor: move once, maximise once. A maximised window
+            # reports its rect with the invisible border, so it is judged by
+            # which monitor holds it, not by pixels.
+            target = (park[0], park[1], park[0] + park[2], park[1] + park[3])
+            end = time.monotonic() + 12
+            while time.monotonic() < end:
+                if _monitor_of(_rect(h)) != target:
+                    _move(h, park)
+                    _user32().ShowWindow(h, 3)      # SW_MAXIMIZE
+                time.sleep(0.5)
+            return
+        # The player re-sizes itself when the stream arrives; keep putting it
+        # back for a while, then leave it to the person.
+        end = time.monotonic() + 12
+        while time.monotonic() < end:
+            if _rect(h)[:2] != park[:2] or _rect(h)[2] != park[2]:
+                _move(h, park, topmost=True)
+            time.sleep(0.5)
+    threading.Thread(target=park_player, daemon=True).start()
+    _watch_player()
+    return _webcam_proc
+
+
+_watch_gen = 0
+
+
+def _watch_player() -> None:
+    """Stop the capture when the player window goes away.
+
+    Capture, encoding and UDP would otherwise run until 'stop' with nobody
+    listening. The player is watched by window class (single instance), on
+    a thread that stands down when a newer capture starts.
+    """
+    import threading
+    import time
+    global _watch_gen
+    _watch_gen += 1
+    gen = _watch_gen
+
+    def run() -> None:
+        u = _user32()
+        seen = False
+        end = time.monotonic() + 15
+        while gen == _watch_gen:
+            h = u.FindWindowW(WINDOW_CLASS, None)
+            if h:
+                seen = True
+            elif seen or time.monotonic() > end:
+                if gen == _watch_gen:
+                    stop_webcam()
+                return
+            time.sleep(2.0)
+    threading.Thread(target=run, daemon=True).start()
+
+
+def _unpark_player() -> None:
+    """Take the player out of the topmost band it was parked in."""
+    try:
+        import ctypes
+        import ctypes.wintypes as w
+        u = _user32()
+        h = u.FindWindowW(WINDOW_CLASS, None)
+        if h:
+            u.SetWindowPos.argtypes = [w.HWND, w.HWND, ctypes.c_int, ctypes.c_int,
+                                       ctypes.c_int, ctypes.c_int, ctypes.c_uint]
+            u.SetWindowPos(w.HWND(h), w.HWND(-2), 0, 0, 0, 0, 0x0001 | 0x0002)   # NOTOPMOST, NOSIZE|NOMOVE
+    except Exception:
+        pass
+
+
+def stop_webcam() -> None:
+    global _webcam_proc, _window_feed, _watch_gen
+    _watch_gen += 1                     # stands the player watcher down
+    if _window_feed is not None:
+        _window_feed.stop()
+        _window_feed = None
+    _unpark_player()
+    if _webcam_proc is not None:
+        try:
+            _webcam_proc.kill()
+            _webcam_proc.wait(timeout=3)
+        except Exception:
+            pass
+        _webcam_proc = None
+
+
+WINDOW_CLASS = "MediaPlayerClassicW"
+
+
+def toggle_nr() -> bool:
+    """Press the add-on's toggle key in the running player.
+
+    The DLSS 5 add-on reads its hotkey through ReShade's input hook, which
+    only sees real keyboard input aimed at the player's window - a posted
+    message is ignored. So the player is brought to the front and F6 is
+    pressed for real; the person sees the picture change right there.
+    Returns False when no player window exists.
+    """
+    import ctypes
+    u = ctypes.windll.user32
+    hwnd = u.FindWindowW(WINDOW_CLASS, None)
+    if not hwnd:
+        return False
+    VK_F6, KEYUP, SW_RESTORE = 0x75, 0x0002, 9
+    if u.IsIconic(hwnd):
+        u.ShowWindow(hwnd, SW_RESTORE)
+    u.SetForegroundWindow(hwnd)
+    ctypes.windll.kernel32.Sleep(250)
+    u.keybd_event(VK_F6, 0x40, 0, 0)
+    ctypes.windll.kernel32.Sleep(80)
+    u.keybd_event(VK_F6, 0x40, KEYUP, 0)
+    return True
+
+
+CHECKLIST = (
+    "1. open the player; File > Open File, or File > Open URL with a "
+    "YouTube link (yt-dlp fetches the stream, nothing is downloaded)",
+    f"2. {TOGGLE_KEY} switches neural rendering on and off while it plays - "
+    f"compare for yourself",
+    "3. Home opens the ReShade overlay if you want the DLSS 5 panel (the "
+    "player's own Home = 'jump to start' is unbound for that reason)",
+    "!  there is no depth buffer in a video, the feed runs on colour and "
+    "motion only - 'depth is flat' in the log is expected here",
+)
