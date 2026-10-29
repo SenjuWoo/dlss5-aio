@@ -21,7 +21,10 @@ def main():
         for name in names:
             path = PurePosixPath(name.replace("\\", "/"))
             assert not path.is_absolute() and ".." not in path.parts and ":" not in str(path), name
-            assert path.suffix.lower() not in (".ps1", ".py", ".bat", ".dll", ".addon64", ".addon32"), name
+            assert path.suffix.lower() not in (".ps1", ".bat", ".addon64", ".addon32"), name
+            # Only the frozen Python runtime under _internal may carry .py/.dll; never publisher DLLs at top level.
+            assert path.suffix.lower() not in (".py", ".dll") or "_internal" in path.parts, name
+            assert not any(v in path.name.lower() for v in ("nvngx", "streamline", "amd_fidelityfx", "libxess")), name
         roots = {PurePosixPath(name).parts[0] for name in names}
         assert roots == {f"DLSS5-AIO-v{args.version}"}, roots
         with tempfile.TemporaryDirectory(prefix="AIO fresh extraction with spaces ") as directory:
@@ -29,6 +32,7 @@ def main():
             folder = Path(directory) / next(iter(roots))
             exe = folder / "DLSS5-AIO.exe"
             assert exe.stat().st_size > 1_000_000
+            assert (folder / "_internal").is_dir(), "one-folder runtime missing"
             for name in ("README.txt", "CHANGELOG.md", "LICENSE", "licenses/Python-LICENSE.txt",
                          "licenses/Tcl-LICENSE.txt", "licenses/Tk-LICENSE.txt", "licenses/Autopilot-MIT.txt"):
                 assert (folder / name).is_file(), name

@@ -27,21 +27,27 @@ try {
     & $Python -m PyInstaller --noconfirm --clean --distpath (Join-Path $buildRoot 'frozen') --workpath (Join-Path $buildRoot 'work') app/aio.spec
     if ($LASTEXITCODE -ne 0) { throw 'PyInstaller failed.' }
 } finally { Pop-Location }
-$exe = Join-Path $buildRoot 'frozen\DLSS5-AIO.exe'
-Copy-Item -LiteralPath $exe -Destination $payload
+$frozen = Join-Path $buildRoot 'frozen\DLSS5-AIO'
+if (-not (Test-Path -LiteralPath (Join-Path $frozen 'DLSS5-AIO.exe'))) { throw 'PyInstaller produced no one-folder build.' }
+Copy-Item -Path (Join-Path $frozen '*') -Destination $payload -Recurse
 foreach ($name in @('README.md', 'START-HERE.txt', 'CHANGELOG.md', 'LICENSE', 'LICENSE.md', 'CREDITS.md')) {
     Copy-Item -LiteralPath (Join-Path $repo $name) -Destination $payload
 }
 $notices = Join-Path $payload 'licenses'
 [IO.Directory]::CreateDirectory($notices) | Out-Null
 Copy-Item -LiteralPath (Join-Path $repo 'app\UPSTREAM-LICENSE.txt') -Destination (Join-Path $notices 'Autopilot-MIT.txt')
-$pythonRoot = Split-Path -Parent $Python
+# base_prefix, not the exe folder: a venv's Scripts\ holds none of the license files.
+$pythonRoot = (& $Python -c 'import sys; print(sys.base_prefix)' | Out-String).Trim()
 foreach ($pair in @(@('LICENSE.txt', 'Python-LICENSE.txt'), @('tcl\tcl8.6\license.terms', 'Tcl-LICENSE.txt'), @('tcl\tk8.6\license.terms', 'Tk-LICENSE.txt'))) {
     $notice = Join-Path $pythonRoot $pair[0]
     # CPython's Windows distribution embeds Tcl's notice in its full license.
     if (-not (Test-Path -LiteralPath $notice) -and $pair[1] -eq 'Tcl-LICENSE.txt') {
         $notice = Join-Path $pythonRoot 'LICENSE.txt'
-        if ((Get-Content -LiteralPath $notice -Raw) -notmatch 'Tcl/Tk') { throw 'Python license does not include the Tcl notice.' }
+        if ((Get-Content -LiteralPath $notice -Raw) -notmatch 'Tcl/Tk') { $notice = $null }
+    }
+    # Newer CPython installs ship no Tcl/Tk notice; use the official license.terms vendored in app\.
+    if (-not $notice -or -not (Test-Path -LiteralPath $notice)) {
+        $notice = Join-Path $repo ('app\' + ($pair[1] -replace '-LICENSE\.txt$', '') + '-LICENSE.txt')
     }
     if (-not (Test-Path -LiteralPath $notice)) { throw ('Required runtime license missing: ' + $pair[0]) }
     Copy-Item -LiteralPath $notice -Destination (Join-Path $notices $pair[1])
@@ -74,9 +80,10 @@ The faster NR model announced October 13 is scheduled for October 16.
 [IO.File]::WriteAllText((Join-Path $payload 'README.md'), $packReadme, (New-Object Text.UTF8Encoding($false)))
 $zip = Join-Path $OutputDir ('DLSS5-AIO-v' + $version + '-win-x64.zip')
 Compress-Archive -Path $payload -DestinationPath $zip -Force
-Copy-Item -LiteralPath (Join-Path $payload 'DLSS5-AIO.exe') -Destination (Join-Path $OutputDir 'DLSS5-AIO.exe') -Force
+# No standalone EXE asset: the one-folder EXE cannot start without _internal. The self-updater
+# checks the ZIP hash and the hash of the EXE inside it, so both are listed.
 $sums = @()
-foreach ($artifact in @((Join-Path $OutputDir 'DLSS5-AIO.exe'), $zip)) {
+foreach ($artifact in @((Join-Path $payload 'DLSS5-AIO.exe'), $zip)) {
     $sums += ((Get-FileHash -LiteralPath $artifact -Algorithm SHA256).Hash.ToLower() + '  ' + [IO.Path]::GetFileName($artifact))
 }
 [IO.File]::WriteAllLines((Join-Path $OutputDir 'SHA256SUMS.txt'), $sums, (New-Object Text.UTF8Encoding($false)))

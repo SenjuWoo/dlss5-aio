@@ -393,7 +393,8 @@ def apply_and_restart(new_exe: Path) -> None:
 
     creation = 0x00000008 | 0x08000000        # DETACHED_PROCESS | NO_WINDOW
     command = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "cmd.exe"
-    subprocess.Popen([str(command), "/d", "/c", bat.name], creationflags=creation,
+    # ".\" is required: current Windows builds no longer resolve a bare name from the cwd.
+    subprocess.Popen([str(command), "/d", "/c", ".\\" + bat.name], creationflags=creation,
                      close_fds=True, cwd=str(Path(tempfile.gettempdir())),
                      env=clean_env())
     os._exit(0)

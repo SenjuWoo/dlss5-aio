@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.0.2 - 2026-10-29
+- Ship a one-folder build (`DLSS5-AIO.exe` + `_internal`) instead of a self-extracting single file. The 2.0.1 single-file EXE was blocked by Microsoft Defender (`Trojan:Win32/Suschil!rfn` on the ZIP, `Wacatac.B!ml`/`Contebrew.A!ml` on the EXE); these were false positives from the packed-executable layout. The one-folder build scans clean. No standalone EXE asset is published any more.
+- Fix self-update on current Windows builds: the swap helper is now launched as `.\swap.bat` because `cmd /c <bare name>` no longer resolves from the working directory.
+- Build script works from a virtual environment and Python versions without bundled Tcl/Tk notices (official Tcl/Tk license texts are vendored in `app/`).
+
 ## 2.0.1 - 2026-10-15
 - Fix installer backup failures, interrupted writes and recovery records; preserve later personal edits and unowned files during reinstall, removal and optional-component changes.
 - Constrain all recovery paths to the game and retain originals/records when recovery fails. Legacy records without byte ownership require conservative recovery.

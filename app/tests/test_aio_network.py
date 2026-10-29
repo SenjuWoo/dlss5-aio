@@ -295,7 +295,7 @@ class NetworkBoundaries(unittest.TestCase):
                 bat = folder / "swap.bat"
                 bat.write_text(script, encoding="utf8")
                 env = dict(os.environ, AIO_AUDIT="must not expand")
-                result = subprocess.run([str(Path(os.environ.get("SystemRoot", "C:/Windows")) / "System32/cmd.exe"), "/d", "/c", bat.name], cwd=folder, env=env, capture_output=True, timeout=10)
+                result = subprocess.run([str(Path(os.environ.get("SystemRoot", "C:/Windows")) / "System32/cmd.exe"), "/d", "/c", ".\\" + bat.name], cwd=folder, env=env, capture_output=True, timeout=10)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(target.read_bytes(), b"last good build" if fail else b"verified new build")
 
@@ -316,7 +316,7 @@ class NetworkBoundaries(unittest.TestCase):
         bat = folder / "swap.bat"
         bat.write_text(script, encoding="utf8")
         env = dict(os.environ, AIO_AUDIT="must not expand")
-        result = subprocess.run([str(Path(os.environ.get("SystemRoot", "C:/Windows")) / "System32/cmd.exe"), "/d", "/c", bat.name], cwd=folder, env=env, capture_output=True, timeout=10)
+        result = subprocess.run([str(Path(os.environ.get("SystemRoot", "C:/Windows")) / "System32/cmd.exe"), "/d", "/c", ".\\" + bat.name], cwd=folder, env=env, capture_output=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(target.read_bytes(), b"last good build")
         self.assertEqual((folder / selfupdate.INTERNAL / "python.dll").read_bytes(), b"last good runtime")
