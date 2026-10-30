@@ -2,6 +2,7 @@
 
 ## 2.2.1 - 2026-10-30
 - tModLoader (Terraria's mod loader, a Steam app people launch to play) is a game again: 2.2.0 wrongly listed it with the tools it hides.
+- A game whose AMD FSR upscaler or frame-generation DLL is older but which has no AMD loader beside it (Helldivers 2, for one) no longer keeps a lit Update button: AMD's split builds only work with their loader and one cannot be supplied, so that line is shown as blocked with the reason and the game reads as up to date.
 
 ## 2.2.0 - 2026-10-30
 - Runtimes: NVIDIA SR/RR/FG now pin the publisher's own signed 310.9.16 SDK (the community mirror stays as an alternative), AMD FSR loader, upscaler and frame generation move to FidelityFX SDK 2.4.0 (2.3.0.4555 / 4.1.2.4555 / 4.0.2.4555), Intel XeSS 3.0.2 confirmed current.

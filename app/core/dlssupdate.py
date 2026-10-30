@@ -523,6 +523,22 @@ def newest(catalog: dict | None = None, refresh: bool = False) -> dict[str, dict
     return out
 
 
+def missing_dependency(e: Entry, entries: list, new: dict | None) -> list[str]:
+    """Files `new` needs beside `e` that the game does not have.
+
+    AMD's split upscaler and frame generation only work with the loader of their SDK in
+    the same folder, and a loader the game lacks cannot be supplied by renaming another
+    DLL, so such a line can never be updated and must not count as "behind".
+    """
+    # a record saved before builds carried `requires` still knows the split AMD families
+    needs = (new or {}).get("requires")
+    if needs is None:
+        needs = {FILE_OF["fsr_loader"]: ""} if e.family in ("fsr4", "fsr4_fg") else {}
+    return [name for name in needs
+            if not any(x.path.parent == e.path.parent and x.path.name.lower() == name.lower()
+                       and x.state != MISSING for x in entries)]
+
+
 def outdated(e: Entry, new: dict | None) -> bool:
     """Is there a newer build than the one on disk? Never for an install's swap."""
     if not new or e.state in (INSTALL, MISSING) or not e.version:

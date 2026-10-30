@@ -92,8 +92,11 @@ class DlssControl:
             return None
         news = self.dlss_newest()
         entries = [self._dlss_entry(str(g.folder), d) for d in info["entries"] if isinstance(d, dict)]
-        behind = [e for e in entries if du.outdated(e, news.get(e.family))]
-        return {"g": g, "entries": entries, "behind": behind, "news": news,
+        late = [e for e in entries if du.outdated(e, news.get(e.family))]
+        # a line whose build needs a loader the game does not have can never move
+        blocked = [e for e in late if du.missing_dependency(e, entries, news.get(e.family))]
+        behind = [e for e in late if e not in blocked]
+        return {"g": g, "entries": entries, "behind": behind, "blocked": blocked, "news": news,
                 "anticheat": str(info.get("anticheat") or ""), "running": str(info.get("running") or ""),
                 "anticheat_found": str(info.get("anticheat_found") or ""),
                 "restorable": any(e.backup is not None or e.state == du.UPDATED for e in entries)}
@@ -288,7 +291,8 @@ class DlssControl:
         def work():
             news = {}
             try:
-                news = {f: {"label": e.get("label", ""), "version": e.get("version", "")}
+                news = {f: {"label": e.get("label", ""), "version": e.get("version", ""),
+                            **({"requires": dict(e["requires"])} if isinstance(e.get("requires"), dict) else {})}
                         for f, e in du.newest(refresh=fresh).items()}
             except Exception:
                 log.exception("reading NVIDIA's newest DLSS builds")

@@ -271,7 +271,8 @@ class DlssPage(Page):
         for e, copies in lines.values():
             # an anti-cheat game is dimmed as a whole, but a file this tool already
             # replaced is a change like any other and reads as one
-            self._entry_line(e, news.get(e.family) or {}, x, ly, room, dim and e.state != du.UPDATED, copies)
+            self._entry_line(e, news.get(e.family) or {}, x, ly, room, dim and e.state != du.UPDATED, copies,
+                             blocked=any(e is b for b in r.get("blocked", ())))
             ly += T.px(24)
         if result:
             ok, text = result
@@ -322,7 +323,7 @@ class DlssPage(Page):
                    tip="puts the game's own files back")
         return top + h + T.px(10), waiting
 
-    def _entry_line(self, e, new, x, y, room, dim, copies=1):
+    def _entry_line(self, e, new, x, y, room, dim, copies=1, blocked=False):
         c = self.c
         tags = ("page",)
         f = T.mono(10)
@@ -355,7 +356,9 @@ class DlssPage(Page):
             return
         if not new and e.state not in (du.MISSING, du.INSTALL):
             parts.append(("   no verified compatible update", T.DIM))
-        if du.outdated(e, new):
+        if blocked:
+            parts.append(("   a newer build needs AMD's loader beside it; this game has none", T.DIM))
+        elif du.outdated(e, new):
             parts.append(("  \u2192  " + new.get("version", ""), T.DIM if dim else T.AMBER))
         if e.state == du.UPDATED:
             if e.backup is not None:
