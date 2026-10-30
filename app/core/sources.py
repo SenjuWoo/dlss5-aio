@@ -21,7 +21,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-UA = {"User-Agent": "dlss5-aio/2.1.0 (+local install helper)"}
+UA = {"User-Agent": "dlss5-aio/2.2.0 (+local install helper)"}
 
 RESHADE_HOME = "https://reshade.me"
 RESHADE_SETUP_RE = re.compile(r"/downloads/ReShade_Setup_([\d.]+)_Addon\.exe")
@@ -59,7 +59,7 @@ STANDALONE_ASSETS = ("standalone-dlssnr.addon64", "nvngx.dll", "DLSS5_AIO_Feed.f
 STANDALONE_ZIP = "__zip64__"
 STANDALONE_ZIP_EXTRA = ("StandaloneBoundary.fx",)
 STANDALONE_REPO = "kibblerz/DLSS5-Reshade-AIO"
-# v2.1.0 - v2.2.0: "DLSS5-ReShade-AIO-v2.2.0-64-bit.zip". Only used when the
+# v2.2.0 - v2.2.0: "DLSS5-ReShade-AIO-v2.2.0-64-bit.zip". Only used when the
 # API cannot be reached and the asset list has to be guessed from the tag.
 STANDALONE_ZIP_NAME = "DLSS5-ReShade-AIO-{tag}-64-bit.zip"
 STANDALONE_LATEST = ("https://github.com/kibblerz/DLSS5-Reshade-AIO/releases/"
@@ -943,7 +943,7 @@ def rhi_catalog(force: bool = False) -> dict[str, list[dict]]:
 def nvidia_dlss() -> dict[str, list[dict]]:
     """Use the maintenance catalog's verified NVIDIA builds for installation too."""
     from . import runtimecatalog
-    catalog = runtimecatalog.catalog()
+    catalog = runtimecatalog.catalog(refresh=runtimecatalog.live_first())
     out = {}
     for family in ("dlss", "dlssd", "dlssg"):
         rows = catalog.get(family, [])

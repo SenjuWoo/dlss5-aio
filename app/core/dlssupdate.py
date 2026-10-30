@@ -493,6 +493,8 @@ def newest(catalog: dict | None = None, refresh: bool = False) -> dict[str, dict
     """
     global _NEWEST
     remember = catalog is None
+    if catalog is None and not refresh:
+        refresh = runtimecatalog.live_first()      # the first answer of a run asks the publishers
     if refresh and catalog is None:
         # sources remembers the tag for the run as well; forgetting only ours
         # would read the same old answer back. What we had stays until a new
@@ -512,7 +514,9 @@ def newest(catalog: dict | None = None, refresh: bool = False) -> dict[str, dict
         entries = [x for x in (catalog or {}).get(fam) or [] if isinstance(x, dict) and x.get("url")]
         if not entries:
             continue
-        best = max(entries, key=lambda x: _ver(str(x.get("version") or _number(str(x.get("label", ""))))))
+        # newest version wins; on a tie the publisher's own file beats a community mirror's
+        best = max(entries, key=lambda x: (_ver(str(x.get("version") or _number(str(x.get("label", ""))))),
+                                           "mirror" not in str(x.get("source", ""))))
         out[fam] = dict(best, version=str(best.get("version") or _number(str(best.get("label", "")))))
     if remember and out:
         _NEWEST = out

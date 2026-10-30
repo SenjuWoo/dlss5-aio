@@ -15,7 +15,7 @@ import time
 
 from . import net, prefs
 
-VERSION = "2.1.0"
+VERSION = "2.2.0"
 
 REPO = "SenjuWoo/dlss5-aio"
 API = f"https://api.github.com/repos/{REPO}/releases/latest"

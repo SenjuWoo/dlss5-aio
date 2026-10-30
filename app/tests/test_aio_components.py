@@ -1,6 +1,8 @@
 """Verify component writers preserve originals and use the shared recovery journal."""
 import io
 import sys
+import os
+os.environ.setdefault("DLSS5_AIO_OFFLINE", "1")   # tests never reach the publishers
 import tarfile
 import tempfile
 import unittest

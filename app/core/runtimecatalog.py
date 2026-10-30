@@ -43,10 +43,13 @@ MAX_FILE = 256 * 1024 * 1024
 MAX_ARCHIVE = 256 * 1024 * 1024
 _SHA = re.compile(r"[0-9a-f]{64}\Z")
 _VERSION = re.compile(r"\d+(?:\.\d+){2,3}\Z")
+_SHA1 = re.compile(r"[0-9a-f]{40}\Z")
 _NVIDIA = "374959484e79a640feaba44c93ac8cfb0a03f5b5"
 _AMD = "60f4ea81909200d8542eca14dccb2628b763a9a3"
 _AMD31 = "c6efa6bf7f2027b3ec94f28578bb5965eabb9e55"
 _INTEL = "8fe81bdbbaf00b3c1b733fd0d830c333dc84e6f0"
+_NVIDIA_NEW = "9981c6350dc58c0ce21f024fd65e31e851c31689"      # DLSS 310.9.16 SDK, 2026-10-16
+_AMD_NEW = "7539ae8b6568ad29ed78a753404351daf3b5cca7"         # AMD FSR SDK 2.4.0, 2026-10-28
 
 # SHA256 pins were checked against the publishers' immutable Git blob identities.
 _PINS = (
@@ -63,6 +66,35 @@ _PINS = (
     ("fsr4", "4.1.1.2740", 28761864, "d0dcccc74a43c44ba435b7a369b456e0970d8a4464e4bd683119b374f2c9fb46", "GPUOpen-LibrariesAndSDKs/FidelityFX-SDK", _AMD, "Kits/FidelityFX/signedbin/"),
     ("fsr4_fg", "4.0.1.2740", 40085776, "02297beedd285e822d3a64f314cf00faf378dcec0edc47ff0c4dd71b3a8c2f18", "GPUOpen-LibrariesAndSDKs/FidelityFX-SDK", _AMD, "Kits/FidelityFX/signedbin/"),
 )
+# Snapshot of the publishers' newest signed builds at the 2026-10-30 check. Each was
+# downloaded from the commit-addressed URL, matched to the Git blob id GitHub lists for
+# it, and checked for a valid publisher Authenticode signature and its FileVersion.
+_PINS_LATEST = (
+    ("dlss", "310.9.16", 58956912, "d00b5b0ab29c3ca101b70c3a5ecb3a01b7ef33766a3383a28a18623083e6123e", "NVIDIA/DLSS", _NVIDIA_NEW, "lib/Windows_x86_64/rel/"),
+    ("dlssg", "310.9.16", 7506544, "8d59d49b36410dd6b62fef2503a5871d347415bd85d943fa0848563a95dd50c7", "NVIDIA/DLSS", _NVIDIA_NEW, "lib/Windows_x86_64/rel/"),
+    ("dlssd", "310.9.16", 48343664, "b49435ae346f227feafe7bbe937d88277ea0ee7323975ec06488f377fdb46cee", "NVIDIA/DLSS", _NVIDIA_NEW, "lib/Windows_x86_64/rel/"),
+    ("fsr_loader", "2.3.0.4555", 39184, "e2191d3c0828be45eb8affd4e3ec0378f2293adc345b772a7170edcf3b021ecb", "GPUOpen-LibrariesAndSDKs/FidelityFX-SDK", _AMD_NEW, "Kits/FidelityFX/signedbin/"),
+    ("fsr4", "4.1.2.4555", 57664272, "aad4fccccb29084a655f9a4f9f613bd22c8c03fb4a0f8840148cc6543b4ccace", "GPUOpen-LibrariesAndSDKs/FidelityFX-SDK", _AMD_NEW, "Kits/FidelityFX/signedbin/"),
+    ("fsr4_fg", "4.0.2.4555", 29679376, "e6843252f58b0341a0d80f6a20bc0d840643ee95bc48c22cac08745344577bb6", "GPUOpen-LibrariesAndSDKs/FidelityFX-SDK", _AMD_NEW, "Kits/FidelityFX/signedbin/"),
+)
+_BLOBS = {  # Git blob ids of the files above, so a refresh knows them without downloading
+    ("dlss", "310.9.16"): "23c4672e4a31ef303e8f98ff4f0d146bd1718ccf",
+    ("dlssg", "310.9.16"): "71b8070cdced79e8df3414060337c84d91e38422",
+    ("dlssd", "310.9.16"): "36efb7890a7f5754935647c6b3510e21a096512f",
+    ("fsr_loader", "2.3.0.4555"): "f1afee09dd3bcded005c722b1e94befb3ee3f9e6",
+    ("fsr4", "4.1.2.4555"): "6d01d9f52c412fc336350f04e948eb1bee196a38",
+    ("fsr4_fg", "4.0.2.4555"): "445674331676665f18b5acd1b3c8621629cb0e75",
+    ("xess", "2.0.2.68"): "548837c12b215d189884d54db0a480cd3bf2bfd1",       # intel/xess v3.0.2
+    ("xess_dx11", "2.0.2.68"): "1e0247ba23a841ff514841ff963b72b636802a4e",
+    ("xess_fg", "1.3.1.78"): "57a5da469d79e8dceea6af01961030219d391cdf",
+    ("xell", "1.3.2.10"): "c321c6c6cd148dc614e6a339a27976ce0874d2e7",
+}
+# Who may sign each family's DLL; a mirror's or a repository's own hash proves nothing about origin.
+_NVIDIA_FAMILIES = ("dlss", "dlssg", "dlssd")
+_SIGNERS = {**{f: ("NVIDIA Corporation",) for f in _NVIDIA_FAMILIES},
+            **{f: ("Intel Corporation",) for f in ("xess", "xess_dx11", "xess_fg", "xell")},
+            **{f: ("Advanced Micro Devices", "Advanced Micro Devices, Inc.")
+               for f in ("fsr31_dx12", "fsr31_vk", "fsr_loader", "fsr4", "fsr4_fg")}}
 _RHI_PINS = (
     ("dlss", 44480231, "1823ec911c77482e6731447dfb0db3def8aa710e092f59f58c4c4c55285d492d"),
     ("dlssd", 37352309, "33470176d595838fb8751023c56e1e2b56e0da8d19c5c140b1bb325a53984ff2"),
@@ -75,12 +107,31 @@ _RHI_CONTENT = {
     ("dlssd", "310.9.16"): (79669360, "7006c3a729276e876e06a97c6262672a1be96a58d69b0e85877f911146b98fbe"),
 }
 _CATALOG: dict | None = None
+_LIVE_TRIED = False
+
+
+def live_first() -> bool:
+    """True once per run: the first read of the catalog asks the publishers.
+
+    A window opened after a new SDK shipped must not work from the pins alone.
+    DLSS5_AIO_OFFLINE=1 turns it off (the tests set it); a failed ask keeps the pins.
+    """
+    global _LIVE_TRIED
+    if _LIVE_TRIED or os.environ.get("DLSS5_AIO_OFFLINE"):
+        return False
+    _LIVE_TRIED = True
+    return True
 _CACHE_LOCK = threading.RLock()
 
 
 def _version(value: str) -> tuple:
     parts = tuple(int(part) for part in value.split("."))
     return parts + (0,) * (4 - len(parts))
+
+
+def _order(row: dict) -> tuple:
+    """Newest first; on a tie the publisher's own file comes before a community mirror's."""
+    return _version(row["version"]), "mirror" not in str(row.get("source", ""))
 
 
 def _rhi_build(family: str, version: str, archive_size: int, digest: str) -> dict:
@@ -93,18 +144,32 @@ def _rhi_build(family: str, version: str, archive_size: int, digest: str) -> dic
             "source": "RankFTW/rhi-repo community mirror"}
 
 
+def _entry(family: str, version: str, size: int, digest: str, repo: str, commit: str, folder: str,
+           blob: str = "", requires: dict | None = None) -> dict:
+    entry = {"label": f"{version} ({repo.split('/')[0]} SDK)", "version": version,
+             "url": f"https://raw.githubusercontent.com/{repo}/{commit}/{folder}{FILE_OF[family]}",
+             "sha256": digest, "size": size, "raw": True,
+             "source": f"{repo}@{commit}", "member": FILE_OF[family]}
+    if blob:
+        entry["blob"] = blob
+    if requires:
+        entry["requires"] = requires
+    return entry
+
+
 def _pinned() -> dict:
     out = {family: [] for family in FILE_OF}
-    for family, version, size, digest, repo, commit, folder in _PINS:
-        entry = {"label": f"{version} ({repo.split('/')[0]} SDK)", "version": version,
-                 "url": f"https://raw.githubusercontent.com/{repo}/{commit}/{folder}{FILE_OF[family]}",
-                 "sha256": digest, "size": size, "raw": True,
-                 "source": f"{repo}@{commit}", "member": FILE_OF[family]}
-        if family in ("fsr4", "fsr4_fg"):
-            entry["requires"] = {FILE_OF["fsr_loader"]: "2.3.0.2740"}
-        out[family].append(entry)
+    pins = _PINS + _PINS_LATEST
+    loaders = {commit: version for family, version, _s, _d, _r, commit, _f in pins if family == "fsr_loader"}
+    for family, version, size, digest, repo, commit, folder in pins:
+        # Split AMD runtimes need the loader built with them
+        needs = {FILE_OF["fsr_loader"]: loaders[commit]} if family in ("fsr4", "fsr4_fg") else None
+        out[family].append(_entry(family, version, size, digest, repo, commit, folder,
+                                  _BLOBS.get((family, version), ""), needs))
     for family, size, digest in _RHI_PINS:
         out[family].insert(0, _rhi_build(family, "310.9.16", size, digest))
+    for rows in out.values():
+        rows.sort(key=_order, reverse=True)
     return out
 
 
@@ -137,6 +202,7 @@ def catalog(refresh: bool = False) -> dict:
     if _CATALOG is None:
         _CATALOG = _pinned()
     if refresh:
+        _refresh_publishers()
         try:
             feed = net.json_get(RHI_FEED)
             if not isinstance(feed, dict):
@@ -150,8 +216,7 @@ def catalog(refresh: bool = False) -> dict:
                         if entry:
                             rows = _CATALOG[family]
                             rows = [row for row in rows if row["label"] != entry["label"]]
-                            _CATALOG[family] = sorted(rows + [entry],
-                                                     key=lambda row: _version(row["version"]), reverse=True)
+                            _CATALOG[family] = sorted(rows + [entry], key=_order, reverse=True)
                     except Exception as exc:
                         log.write(f"runtime catalog {family}: {exc}; keeping verified pins", "warn")
         except Exception as exc:
@@ -245,17 +310,102 @@ $product=(Get-Item -LiteralPath $env:DLSS5_AIO_VERIFY_PATH).VersionInfo.ProductN
 
 
 def _verify_publisher(path: Path, family: str) -> None:
-    """A mirror-owned hash cannot prove that a future DLL came from NVIDIA."""
+    """A mirror's or a repository's own hash cannot prove a DLL came from its publisher."""
     signature = _signature(path)
-    if (family not in ("dlss", "dlssg", "dlssd") or not isinstance(signature, dict)
-            or signature.get("status") != "Valid" or signature.get("signer") != "NVIDIA Corporation"):
-        raise ValueError("New mirror runtime has no valid NVIDIA publisher signature")
+    signers = _SIGNERS.get(family)
+    if (not signers or not isinstance(signature, dict)
+            or signature.get("status") != "Valid" or signature.get("signer") not in signers):
+        raise ValueError("New runtime has no valid publisher signature")
     # Signed SR, RR and FG can share a version; a renamed DLL is still the wrong ABI.
     products = {"dlss": "NVIDIA Deep Learning SuperSampling",
                 "dlssg": "NVIDIA DLSS-G MFGLW",
                 "dlssd": "NVIDIA DLSS Ray Reconstruction"}
-    if signature.get("product") != products[family]:
-        raise ValueError("New mirror runtime's signed product identity differs from its family")
+    if family in products and signature.get("product") != products[family]:
+        raise ValueError("New runtime's signed product identity differs from its family")
+
+
+def _git_blob_id(path: Path) -> str:
+    """The id Git gives a file's bytes, which GitHub lists for every file in a tree."""
+    import hashlib
+    h = hashlib.sha1(b"blob %d\0" % path.stat().st_size)
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def _take_publisher_build(repo: str, commit: str, family: str, item: dict | None) -> None:
+    """Add the publisher's current file for `family` if the catalog does not have it yet."""
+    if not item:
+        return
+    blob, size = str(item.get("sha", "")), item.get("size")
+    if not _SHA1.fullmatch(blob) or not isinstance(size, int) or not 0 < size <= MAX_FILE:
+        raise ValueError("the repository listing is unusable")
+    if any(row.get("blob") == blob for row in _CATALOG[family]):
+        return
+    url = f"https://raw.githubusercontent.com/{repo}/{commit}/{item['path']}"
+    with _CACHE_LOCK, net.cache_locked():
+        got = net.download(url, f"publisher-{family}-{blob}.dll", max_bytes=size)
+        try:
+            if got.stat().st_size != size or _git_blob_id(got) != blob:
+                raise ValueError("download does not match the repository's own file id")
+            _verify(got, "", size)
+            _verify_publisher(got, family)
+            version = pe.file_version(got) or ""
+            if not _VERSION.fullmatch(version):
+                raise ValueError(f"unreadable FileVersion {version!r}")
+            digest = net.sha256(got)
+            dest = net.cache_dir() / f"runtime-{family}-{digest}.dll"
+            got.replace(dest)
+        except Exception:
+            got.unlink(missing_ok=True)
+            raise
+    folder = item["path"][:-len(FILE_OF[family])]
+    entry = _entry(family, version, size, digest, repo, commit, folder, blob)
+    if family in ("fsr4", "fsr4_fg"):
+        loader = max((row for row in _CATALOG["fsr_loader"] if row.get("source", "").endswith(commit)),
+                     key=lambda row: _version(row["version"]), default=None)
+        if loader:
+            entry["requires"] = {FILE_OF["fsr_loader"]: loader["version"]}
+    rows = [row for row in _CATALOG[family] if row["version"] != version]
+    _CATALOG[family] = sorted(rows + [entry], key=_order, reverse=True)
+    log.write(f"runtime catalog {family}: {version} from {repo}@{commit[:10]}")
+
+
+def _refresh_publishers() -> None:
+    """Newest signed builds straight from NVIDIA's, AMD's and Intel's own repositories.
+
+    A repository is read only when its head is not a commit already known, and a file is
+    downloaded only when GitHub lists a blob the catalog does not have. Each download must
+    match the blob id GitHub lists, be a valid x64 DLL, carry the publisher's signature and
+    a readable FileVersion. Any failure keeps the pins already verified.
+    """
+    repos: dict[str, dict] = {}
+    for family, _v, _s, _d, repo, commit, folder in _PINS + _PINS_LATEST:
+        info = repos.setdefault(repo, {"folders": {}, "known": set()})
+        info["folders"][family] = folder
+        info["known"].add(commit)
+    for repo, info in repos.items():
+        try:
+            head = str(net.json_get(f"https://api.github.com/repos/{repo}/commits/HEAD").get("sha", ""))
+            if not _SHA1.fullmatch(head):
+                raise ValueError("no usable head commit")
+            if head in info["known"] or any(row.get("source", "").endswith(head)
+                                            for rows in _CATALOG.values() for row in rows):
+                continue
+            tree = net.json_get(f"https://api.github.com/repos/{repo}/git/trees/{head}?recursive=1")
+            if not isinstance(tree, dict) or tree.get("truncated"):
+                raise ValueError("repository listing is incomplete")
+            files = {t.get("path"): t for t in tree.get("tree", []) if t.get("type") == "blob"}
+        except Exception as exc:
+            log.write(f"runtime catalog {repo}: {exc}; keeping verified pins", "warn")
+            continue
+        # loaders first: an upscaler's `requires` names the loader of its own commit
+        for family in sorted(info["folders"], key=lambda f: f != "fsr_loader"):
+            try:
+                _take_publisher_build(repo, head, family, files.get(info["folders"][family] + FILE_OF[family]))
+            except Exception as exc:
+                log.write(f"runtime catalog {family}: {exc}; keeping verified pins", "warn")
 
 
 def resolve(build: dict, family: str, progress=None) -> Path:

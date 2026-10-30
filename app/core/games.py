@@ -941,7 +941,7 @@ def quick_scan(known: list, progress=None) -> tuple[list, list]:
         (not searched for here), and anything this tool set up, so it can
         still be uninstalled.
         """
-        if not g.folder.exists():
+        if not g.folder.exists() or is_non_game(g):
             return False
         if g.source in ("Manual", "Emulator") or getattr(g, "kind", "") == "video":
             return True
@@ -1015,7 +1015,52 @@ def list_games(progress=None, emulators: bool = True) -> list[Game]:
             "ubisoft", "xboxgames", "amazon games", "battle.net", "common",
             "riot games", "rockstar games")
     return [g for g in games
-            if not (g.source == "Folder" and g.folder.name.lower() in junk)]
+            if not (g.source == "Folder" and g.folder.name.lower() in junk)
+            and not is_non_game(g)]
+
+
+# Steam (and the other stores) list tools, runtimes and VR utilities beside the
+# games. None of them has a graphics pipeline to put DLSS into. Matched on the
+# name with everything but letters and digits dropped, so "OVR Toolkit",
+# "OVRToolkit" and "ovr_toolkit" are one entry.
+NON_GAME_NAMES = frozenset((
+    "steamvr", "steamvrperformancetest", "steamworkscommonredistributables", "steamworksshared",
+    "spacewar", "wallpaperengine", "tmodloader", "ovrtoolkit", "ovradvancedsettings",
+    "slimevr", "slimevrserver", "xsoverlay", "virtualdesktopstreamer", "losslessscaling",
+    "blender", "obsstudio", "aseprite", "vroidstudio", "vseeface", "vtubestudio", "vnyan",
+    "warudo", "facerig", "livesplit", "rivatunerstatisticsserver", "eaapp", "ubisoftconnect",
+    "epiconlineservices", "battlenet", "geforcenow", "oculus", "metaquestlink",
+))
+NON_GAME_PREFIXES = ("steamlinuxruntime", "sourcesdkbase", "steamcontroller", "steamworks", "steamvr")
+# Proton builds only ("Proton 9.0", "Proton Experimental"), never a game that starts with the word
+_PROTON = re.compile(r"^proton(\d|experimental|hotfix|easyanticheat|battleye)")
+NON_GAME_PARTS = ("dedicatedserver", "creationkit", "modkit", "sdk")
+
+
+def is_non_game(g: "Game") -> bool:
+    """A tool, runtime or utility a store lists next to the games.
+
+    Never true for a folder this tool has installed into: that entry has to
+    stay so the install can be taken out again.
+    """
+    try:
+        if _marked(g.folder):
+            return False
+    except Exception:
+        pass
+    for raw in (g.name, getattr(g.folder, "name", "")):
+        n = re.sub(r"[^a-z0-9]", "", str(raw).lower())
+        if not n:
+            continue
+        if n in NON_GAME_NAMES or n.startswith(NON_GAME_PREFIXES) or _PROTON.match(n):
+            return True
+        # "sdk" inside a word (a game called "Sdkfoo") is not a tool; as the whole
+        # name or as its own word at the end ("Source SDK", "Creation Kit") it is
+        tokens = re.findall(r"[a-z0-9]+", str(raw).lower())
+        if tokens and (tokens[-1] == "sdk" or "".join(tokens[-2:]) in NON_GAME_PARTS
+                       or "".join(tokens) in NON_GAME_PARTS):
+            return True
+    return False
 
 
 def same_exe_once(games: list) -> list:

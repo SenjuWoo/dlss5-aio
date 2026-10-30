@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.2.0 - 2026-10-30
+- Runtimes: NVIDIA SR/RR/FG now pin the publisher's own signed 310.9.16 SDK (the community mirror stays as an alternative), AMD FSR loader, upscaler and frame generation move to FidelityFX SDK 2.4.0 (2.3.0.4555 / 4.1.2.4555 / 4.0.2.4555), Intel XeSS 3.0.2 confirmed current.
+- Live refresh: the first lookup of each run and every Check again read NVIDIA's, AMD's and Intel's repositories and take any newer file that matches GitHub's blob id and carries the publisher's valid signature; failures keep the verified pins. Installation routes use the same newest build.
+- Games: tools and utilities a store lists (SteamVR, SlimeVR, OVR Toolkit, tModLoader, Steamworks redistributables, Creation Kit, SDKs, dedicated servers, Proton and similar) are no longer shown as games, including from a previously saved library.
+- Runtime page: files already updated in an anti-cheat game now read as changed like any other game's; only the not-yet-updated lines stay dimmed.
+- New application icon: a pixel-built 5 on a dark tile.
+
 ## 2.1.0 - 2026-10-30
 - New visual identity, replacing the look inherited from Autopilot: a conservation-record design. Neutral studio-grey ground, paper accession tags for games and chips, a scale-bar ruler for navigation and filters, vendor swatches (NVIDIA, AMD, Intel) in the runtime ledger, DIN-style Bahnschrift type, tag-shaped clipped-corner buttons, cyanotype blue as the single action colour and vermilion for risk only.
 - Navigation moves from the left icon rail to a top bar with the pages set on the ruler; the log, help and watch controls keep their places on the right and bottom.

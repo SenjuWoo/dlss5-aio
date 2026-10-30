@@ -10,6 +10,8 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import sys
+import os
+os.environ.setdefault("DLSS5_AIO_OFFLINE", "1")   # tests never reach the publishers
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from core import dlss, games, installer, library, log, net, pe, prefs, watch

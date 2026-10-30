@@ -53,7 +53,7 @@ One action colour (cyanotype) and one risk colour (vermilion). State is always a
 
 ## Icon
 
-A paper tag with a punch hole, a cyanotype patch and ruler ticks (`docs/images/logo.svg`, `app/dlss5-aio.ico`, `app/core/icon_png.py`).
+A pixel-built 5 in paper on a dark rounded tile with a hairline edge; one pixel (top right) is cyanotype, the one that "resolved" (`docs/images/logo.svg`, `app/dlss5-aio.ico`, `app/core/icon_png.py`).
 
 ## Not covered
 

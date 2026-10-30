@@ -1,5 +1,7 @@
 """Keep injection and DLL maintenance on the same authenticated NVIDIA builds."""
 import sys
+import os
+os.environ.setdefault("DLSS5_AIO_OFFLINE", "1")   # tests never reach the publishers
 import tempfile
 import unittest
 import urllib.error

@@ -1,8 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="DLSS 5 AIO">
-  <path d="M56 28H144L200 84V232H56Z" fill="#E8E2D2"/>
-  <circle cx="92" cy="64" r="13" fill="#1B1C1B"/>
-  <rect x="84" y="128" width="88" height="80" fill="#7FB6D6"/>
-  <g stroke="#191A18" stroke-width="3.2">
-    <path d="M56 110H78"/><path d="M56 124H70"/><path d="M56 138H78"/><path d="M56 152H70"/><path d="M56 166H78"/><path d="M56 180H70"/><path d="M56 194H78"/><path d="M56 208H70"/><path d="M56 222H78"/>
-  </g>
+  <rect x="4" y="4" width="248" height="248" rx="52" fill="#43463F"/>
+  <rect x="12" y="12" width="232" height="232" rx="44" fill="#1B1C1B"/>
+  <rect x="53" y="23" width="30" height="30" fill="#E8E2D2"/><rect x="83" y="23" width="30" height="30" fill="#E8E2D2"/><rect x="113" y="23" width="30" height="30" fill="#E8E2D2"/><rect x="143" y="23" width="30" height="30" fill="#E8E2D2"/><rect x="173" y="23" width="30" height="30" fill="#7FB6D6"/><rect x="53" y="53" width="30" height="30" fill="#E8E2D2"/><rect x="53" y="83" width="30" height="30" fill="#E8E2D2"/><rect x="83" y="83" width="30" height="30" fill="#E8E2D2"/><rect x="113" y="83" width="30" height="30" fill="#E8E2D2"/><rect x="143" y="83" width="30" height="30" fill="#E8E2D2"/><rect x="173" y="113" width="30" height="30" fill="#E8E2D2"/><rect x="173" y="143" width="30" height="30" fill="#E8E2D2"/><rect x="53" y="173" width="30" height="30" fill="#E8E2D2"/><rect x="173" y="173" width="30" height="30" fill="#E8E2D2"/><rect x="83" y="203" width="30" height="30" fill="#E8E2D2"/><rect x="113" y="203" width="30" height="30" fill="#E8E2D2"/><rect x="143" y="203" width="30" height="30" fill="#E8E2D2"/>
 </svg>

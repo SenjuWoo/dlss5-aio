@@ -556,7 +556,7 @@ class LibraryControl:
         if not got:
             return False
         gs, rows, changed = got
-        self.all_games = [g for g in gs if getattr(g, "kind", "game") != "video"]
+        self.all_games = [g for g in gs if getattr(g, "kind", "game") != "video" and not games.is_non_game(g)]
         self._rows.clear()
         self._rows.update(rows)
         self._recheck = {str(g.folder) for g in changed}

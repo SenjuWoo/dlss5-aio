@@ -1,6 +1,6 @@
 # Runtime sources and verified versions
 
-Runtime snapshot checked October 14, 2026; download and recovery boundaries re-audited October 15 for v2.0.1. The version research below is retained as dated evidence, not a new upstream lookup. Runtime maintenance and DLSS 5 neural rendering are separate workflows: replacing a DLL updates an existing compatible integration; it cannot create one.
+Runtime snapshot rechecked October 30, 2026 against the publishers' own repositories (NVIDIA/DLSS v310.9.16, AMD FidelityFX SDK 2.4.0, intel/xess v3.0.2); download and recovery boundaries re-audited October 15 for v2.0.1. Since 2.2.0 the app also asks the publishers itself, see "Live refresh" below. Runtime maintenance and DLSS 5 neural rendering are separate workflows: replacing a DLL updates an existing compatible integration; it cannot create one.
 
 ## What is available
 
@@ -8,16 +8,16 @@ Runtime snapshot checked October 14, 2026; download and recovery boundaries re-a
 
 | Existing runtime filename | Verified FileVersion | Source |
 | --- | --- | --- |
-| `nvngx_dlss.dll`, `nvngx_dlssg.dll`, `nvngx_dlssd.dll` | 310.9.16 | RHI community mirror; NVIDIA signatures verified during this audit |
+| `nvngx_dlss.dll`, `nvngx_dlssg.dll`, `nvngx_dlssd.dll` | 310.9.16 | NVIDIA/DLSS SDK 310.9.16 (`9981c6350dc58c0ce21f024fd65e31e851c31689`), NVIDIA signature Valid; the RHI community mirror carries the same version as an alternative |
 | `libxess.dll`, `libxess_dx11.dll` | 2.0.2.68 | Intel XeSS SDK 3.0.2 |
 | `libxess_fg.dll` | 1.3.1.78 | Intel XeSS SDK 3.0.2 |
 | `libxell.dll` | 1.3.2.10 | Intel XeSS SDK 3.0.2 |
 | `amd_fidelityfx_dx12.dll`, `amd_fidelityfx_vk.dll` | 1.0.1.41314 | AMD FidelityFX SDK 1.1.4; combined FSR 3.1 layout |
-| `amd_fidelityfx_loader_dx12.dll` | 2.3.0.2740 | AMD FidelityFX SDK 2.3.0; split layout |
-| `amd_fidelityfx_upscaler_dx12.dll` | 4.1.1.2740 | AMD FidelityFX SDK 2.3.0; split layout |
-| `amd_fidelityfx_framegeneration_dx12.dll` | 4.0.1.2740 | AMD FidelityFX SDK 2.3.0; split layout |
+| `amd_fidelityfx_loader_dx12.dll` | 2.3.0.4555 | AMD FidelityFX SDK 2.4.0 (`7539ae8b6568ad29ed78a753404351daf3b5cca7`); split layout, AMD signature Valid |
+| `amd_fidelityfx_upscaler_dx12.dll` | 4.1.2.4555 | AMD FidelityFX SDK 2.4.0; split layout |
+| `amd_fidelityfx_framegeneration_dx12.dll` | 4.0.2.4555 | AMD FidelityFX SDK 2.4.0; split layout |
 
-SDK release numbers, DLL FileVersions and product names are different identifiers. In particular, XeSS SDK 3.0.2 contains SR DLL 2.0.2.68. A legacy combined AMD DLL's FileVersion does not turn it into FSR 4. The split AMD effects require an existing compatible loader 2.3.0.2740 or newer in the same directory; AIO does not rename them over combined or `ffx_fsr3*` DLLs.
+SDK release numbers, DLL FileVersions and product names are different identifiers. In particular, XeSS SDK 3.0.2 contains SR DLL 2.0.2.68. A legacy combined AMD DLL's FileVersion does not turn it into FSR 4. The split AMD effects require an existing compatible loader of the same SDK (2.3.0.4555 for the 2.4.0 builds) or newer in the same directory; AIO does not rename them over combined or `ffx_fsr3*` DLLs.
 
 ## Immutable provenance
 
@@ -42,7 +42,11 @@ In v2.0.1, refreshed NVIDIA mirror entries without a bundled extracted-DLL SHA25
 
 ## Refresh and compatibility limits
 
-The shipped AMD and Intel entries are a verified dated snapshot. **Check again** dynamically refreshes NVIDIA SR/RR/FG through RHI; it does not claim to discover future AMD or Intel SDK releases automatically. A failed feed or asset lookup retains verified entries. Changing a remote asset cannot silently change a bundled pin's bytes: downloads and cached files must still match the expected digest.
+## Live refresh
+
+The first runtime lookup of every run, and every **Check again**, asks the publishers: for NVIDIA/DLSS, GPUOpen FidelityFX-SDK and intel/xess the app reads the repository's head commit and file listing from the GitHub API. Only when the head commit is new and a listed file's Git blob id is one the catalog does not already hold is that file downloaded, from its commit-addressed URL. The bytes must match the blob id GitHub lists, be an x64 DLL, carry a valid Authenticode signature from the publisher (NVIDIA Corporation, Advanced Micro Devices, or Intel Corporation; the NVIDIA product name must also match the family), and expose a readable FileVersion, which becomes the build's version. The community RHI feed is still consulted for NVIDIA. A failed lookup, a mismatch or a missing signature retains the verified pins below; offline use is unaffected. The FSR 3.1 DLLs are no longer in the AMD repository's head and stay pinned.
+
+The shipped pins are the offline snapshot. A failed feed or asset lookup retains verified entries. Changing a remote asset cannot silently change a bundled pin's bytes: downloads and cached files must still match the expected digest.
 
 Archives must contain exactly one expected DLL basename and optional documentation. Traversal, duplicate names, symlinks, encryption, unrelated executable payloads and excessive expansion are refused. Downloads stay in AIO's cache until the updater rechecks the game's current bytes, preserves its original, and stages a verified replacement.
 

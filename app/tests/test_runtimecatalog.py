@@ -6,6 +6,8 @@ import hashlib
 import stat
 import struct
 import sys
+import os
+os.environ.setdefault("DLSS5_AIO_OFFLINE", "1")   # tests never reach the publishers
 import tempfile
 import threading
 import time
@@ -80,9 +82,13 @@ class RuntimeCatalogTests(unittest.TestCase):
             for entry in entries:
                 self.assertEqual(entry["member"], catalog.FILE_OF[family])
                 self.assertRegex(entry.get("sha256") or entry.get("archive_sha256"), r"^[0-9a-f]{64}$")
-        self.assertIn("community", data["dlss"][0]["source"])
+        self.assertIn("NVIDIA/DLSS@", data["dlss"][0]["source"])          # the publisher's own file first
+        self.assertTrue(any("community" in e["source"] for e in data["dlss"]))
         self.assertEqual(data["xess"][0]["version"], "2.0.2.68")
-        self.assertEqual(data["fsr4"][0]["requires"], {"amd_fidelityfx_loader_dx12.dll": "2.3.0.2740"})
+        self.assertEqual(data["fsr4"][0]["requires"], {"amd_fidelityfx_loader_dx12.dll": "2.3.0.4555"})
+        self.assertEqual(data["fsr4"][0]["version"], "4.1.2.4555")
+        # NVIDIA's own signed 310.9.16 is pinned beside the community mirror's
+        self.assertTrue(any(e["version"] == "310.9.16" and "NVIDIA/DLSS@" in e["source"] for e in data["dlss"]))
         data["dlss"].clear()
         self.assertTrue(catalog.catalog()["dlss"])
 
@@ -187,7 +193,7 @@ class RuntimeCatalogTests(unittest.TestCase):
                     self.resolve(path)
 
     def test_family_missing_hash_bad_size_and_insecure_host_are_rejected_before_download(self):
-        entry = catalog.catalog()["dlss"][0]
+        entry = next(e for e in catalog.catalog()["dlss"] if not e.get("raw"))     # the mirror's archive
         for change in ({"member": "nvngx_dlssg.dll"}, {"archive_sha256": ""},
                        {"archive_size": 0}, {"url": "http://github.com/runtime.zip"},
                        {"url": "https://github.com.evil.invalid/runtime.zip"},
@@ -278,6 +284,75 @@ class RuntimeCatalogTests(unittest.TestCase):
                           {"dlss": [item]} if url == catalog.RHI_FEED else
                           {"assets": [{"browser_download_url": item["url"], "size": 1234}]}):
             self.assertEqual(catalog.catalog(refresh=True), expected)
+
+
+class PublisherRefreshTests(RuntimeCatalogTests):
+    """The repositories' own newest builds, found without a pin."""
+
+    def setUp(self):
+        super().setUp()
+        self.payload = dll() + b"\0" * 64
+        self.blob = hashlib.sha1(b"blob %d\0" % len(self.payload) + self.payload).hexdigest()
+        self.head = "b" * 40
+        self.asked = []
+
+    def fake_get(self, blob=None, head=None):
+        blob = blob or self.blob
+
+        def get(url):
+            self.asked.append(url)
+            if url == catalog.RHI_FEED:
+                return {}
+            if url.endswith("/commits/HEAD"):
+                return {"sha": head or self.head}
+            if "/git/trees/" in url:
+                files = [] if "NVIDIA/DLSS" not in url else [
+                    {"type": "blob", "path": "lib/Windows_x86_64/rel/nvngx_dlss.dll", "sha": blob,
+                     "size": len(self.payload)}]
+                return {"tree": files, "truncated": False}
+            raise OSError("unexpected " + url)
+        return get
+
+    def fake_download(self, url, name, **kw):
+        path = self.root / name
+        path.write_bytes(self.payload)
+        return path
+
+    def refresh(self, **kw):
+        with patch.object(catalog.net, "json_get", side_effect=self.fake_get(**kw)), \
+                patch.object(catalog.net, "download", side_effect=self.fake_download), \
+                patch.object(catalog.pe, "file_version", return_value="310.10.0"):
+            return catalog.catalog(refresh=True)
+
+    def test_a_new_signed_publisher_file_becomes_the_newest_build(self):
+        result = self.refresh()
+        top = result["dlss"][0]
+        self.assertEqual(top["version"], "310.10.0")
+        self.assertIn("NVIDIA/DLSS@" + self.head, top["source"])
+        self.assertEqual(top["blob"], self.blob)
+        self.assertEqual(top["sha256"], hashlib.sha256(self.payload).hexdigest())
+        self.assertTrue((self.root / f"runtime-dlss-{top['sha256']}.dll").is_file())
+
+    def test_a_file_that_is_not_the_one_github_listed_is_refused(self):
+        before = catalog.catalog()
+        self.assertEqual(self.refresh(blob="c" * 40), before)
+
+    def test_an_unsigned_or_wrong_publisher_file_is_refused(self):
+        before = catalog.catalog()
+        with patch.object(catalog, "_signature", return_value={"status": "Valid", "signer": "Somebody Else",
+                                                              "product": "NVIDIA Deep Learning SuperSampling"}):
+            self.assertEqual(self.refresh(), before)
+
+    def test_a_head_commit_already_pinned_is_not_read_again(self):
+        self.refresh(head=catalog._NVIDIA_NEW)
+        self.assertFalse(any("/git/trees/" in u and "NVIDIA/DLSS" in u for u in self.asked))
+
+    def test_amd_signer_is_accepted_for_amd_families_only(self):
+        with patch.object(catalog, "_signature", return_value={"status": "Valid", "signer": "Advanced Micro Devices",
+                                                              "product": "AMD FidelityFX Upscaler"}):
+            catalog._verify_publisher(self.root / "x.dll", "fsr4")
+            with self.assertRaisesRegex(ValueError, "publisher signature"):
+                catalog._verify_publisher(self.root / "x.dll", "dlss")
 
 
 if __name__ == "__main__":

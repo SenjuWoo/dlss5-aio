@@ -269,7 +269,9 @@ class DlssPage(Page):
                           font=T.mono(8), fill=T.WARN, anchor="w", tags=tags)
         ly = top + T.px(54)
         for e, copies in lines.values():
-            self._entry_line(e, news.get(e.family) or {}, x, ly, room, dim, copies)
+            # an anti-cheat game is dimmed as a whole, but a file this tool already
+            # replaced is a change like any other and reads as one
+            self._entry_line(e, news.get(e.family) or {}, x, ly, room, dim and e.state != du.UPDATED, copies)
             ly += T.px(24)
         if result:
             ok, text = result

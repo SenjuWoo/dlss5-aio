@@ -4,6 +4,8 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import os
+os.environ.setdefault("DLSS5_AIO_OFFLINE", "1")   # tests never reach the publishers
 import tempfile
 import unittest
 from unittest.mock import patch

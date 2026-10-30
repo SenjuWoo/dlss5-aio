@@ -6,6 +6,8 @@ hashes, VERSIONINFO parsing, backup records and OS locks are real.
 import os
 import subprocess
 import sys
+import os
+os.environ.setdefault("DLSS5_AIO_OFFLINE", "1")   # tests never reach the publishers
 import tempfile
 import threading
 import unittest

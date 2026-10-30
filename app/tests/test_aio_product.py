@@ -4,6 +4,8 @@ import io
 import json
 import subprocess
 import sys
+import os
+os.environ.setdefault("DLSS5_AIO_OFFLINE", "1")   # tests never reach the publishers
 import tempfile
 import unittest
 from contextlib import ExitStack, redirect_stderr, redirect_stdout

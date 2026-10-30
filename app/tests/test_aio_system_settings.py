@@ -1,5 +1,7 @@
 """Prove GPU preference changes cannot precede their recovery record."""
 import sys
+import os
+os.environ.setdefault("DLSS5_AIO_OFFLINE", "1")   # tests never reach the publishers
 import unittest
 from pathlib import Path
 from unittest.mock import patch
