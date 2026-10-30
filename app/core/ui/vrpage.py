@@ -135,8 +135,8 @@ class VrPage(Page):
         pad = T.px(44)
         tags = ("page",)
         w = min(width - 2 * pad, T.px(1100))
-        c.create_text(pad, T.px(50), text="vr", font=T.mono(22, True), fill=T.TEXT, anchor="w", tags=tags)
-        c.create_text(pad + T.px(2), T.px(84),
+        c.create_text(pad, T.px(52), text="vr", font=T.display(34), fill=T.TEXT, anchor="w", tags=tags)
+        c.create_text(pad + T.px(2), T.px(90),
                       text="dlss 5 on what the headset shows, through reshade's openxr layer",
                       font=T.mono(10), fill=T.MUTED, anchor="w", tags=tags)
         y = T.px(130)
@@ -220,11 +220,12 @@ class VrPage(Page):
         c.delete(probe)
         body = (pbox[3] - pbox[1]) if pbox else T.px(40)
         bottom = y + T.px(52) + body + T.px(18)
-        c.create_rectangle(x, y, x + w, bottom, fill=T.SURF, outline="", tags=tags)
-        c.create_rectangle(x, y, x + T.px(3), bottom, fill=colour, outline="", tags=tags)
-        c.create_text(x + T.px(20), y + T.px(26), text=head, font=T.mono(10, True), fill=T.TEXT,
+        c.create_polygon(T.tag_points(x, y, x + w, bottom, T.px(10)), fill=T.SURF,
+                         outline=T.LINE, tags=tags)
+        c.create_rectangle(x + T.px(20), y + T.px(20), x + T.px(28), y + T.px(28), fill=colour, outline="", tags=tags)
+        c.create_text(x + T.px(40), y + T.px(26), text=head, font=T.mono(10, True), fill=T.TEXT,
                       anchor="w", tags=tags)
-        c.create_text(x + T.px(20) + T.width(head, T.mono(10, True)) + T.px(20), y + T.px(26),
+        c.create_text(x + T.px(40) + T.width(head, T.mono(10, True)) + T.px(20), y + T.px(26),
                       text=state, font=T.mono(10), fill=colour, anchor="w", tags=tags)
         c.create_text(x + T.px(20), y + T.px(44), text=text, font=T.mono(9), fill=T.MUTED,
                       anchor="nw", width=w - T.px(40), tags=tags)

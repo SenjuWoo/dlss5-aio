@@ -7,6 +7,8 @@ own colour and warms the page's glow towards that colour.
 """
 from __future__ import annotations
 
+import re
+
 from . import imaging
 from . import theme as T
 from .ctl_library import ARCH, FILTERS, SORTS
@@ -44,23 +46,12 @@ class LibraryPage(Page):
         self.width = width
         pad = T.px(44)
         tags = ("page",)
-        # The glow is a stack of flat bands recoloured in place. It was a
-        # gradient image zoomed to the page width, rebuilt on every animation
-        # frame - forty full-width images in half a second each time the
-        # pointer crossed a cover, which is what made scrolling stutter.
         self.glow = []
-        bands, gh = 40, T.px(340)
-        for b in range(bands):
-            y0 = int(gh * b / bands)
-            y1 = int(gh * (b + 1) / bands) + 1
-            self.glow.append(c.create_rectangle(0, y0, width, y1, fill=T.BG, outline="",
-                                                tags=tags + ("glow",)))
-        self._set_glow(*self.glow_now)
-        c.create_text(pad, T.px(50), text="games", font=T.mono(22, True), fill=T.TEXT, anchor="w",
+        c.create_text(pad, T.px(52), text="games", font=T.display(34), fill=T.TEXT, anchor="w",
                       tags=tags)
         # what is in it, in words, under the title - a bare number beside it
         # read as a badge nobody could explain
-        self.count = c.create_text(pad + T.px(2), T.px(84), text="", font=T.mono(10), fill=T.MUTED,
+        self.count = c.create_text(pad + T.px(2), T.px(90), text="", font=T.mono(10), fill=T.MUTED,
                                    anchor="w", tags=tags)
         # scan, with a menu of the other ways to fill the library
         bw = T.px(132)
@@ -72,7 +63,7 @@ class LibraryPage(Page):
         # (#374, #441). Only the icon when the words would cut the search's
         # own hint. The search starts after the title's own width: a fixed
         # 220 px for a five-letter word left it 58 px at the window's narrowest.
-        left = pad + T.width("games", T.mono(22, True)) + T.px(32)
+        left = pad + T.width("games", T.display(34)) + T.px(32)
         hint = T.width("search   ctrl+f", T.mono(10)) + T.px(76)
         aw = T.width("add a game", T.mono(11)) + T.px(62)
         if bx - T.px(12) - aw - T.px(12) - left < max(T.px(150), hint):
@@ -88,7 +79,7 @@ class LibraryPage(Page):
         # the count line under the title stops short of the search box, which
         # now starts where the title ends
         self.count_room = ax - T.px(12) - fw - T.px(16) - pad
-        self.header_h = T.px(150)
+        self.header_h = T.px(176)
         h = self.refresh(first_draw=True)
         return h
 
@@ -118,27 +109,29 @@ class LibraryPage(Page):
         c.itemconfigure(self.count, text=T.fit("  \u00b7  ".join(said), T.mono(10),
                                                min(width - 2 * pad, getattr(self, "count_room", width))))
         # the filter tabs
-        y = T.px(124)
+        y = T.px(132)
         x = pad
+        # the filters sit on a scale bar; the one in force is marked on the bar itself
+        k.ruler(pad, width - pad, y + T.px(20), tags=tags)
         for f in FILTERS:
             if f in ("working", "needs a look", "update") and not n[f] and a.filter != f:
                 continue
             on = a.filter == f
-            font = T.mono(10, on)
+            font = T.mono(11, on)
             label = f
             tag = k.uid("flt")
             wid = T.width(label, font)
-            c.create_rectangle(x - T.px(6), y - T.px(14), x + wid + T.px(34), y + T.px(16), fill="",
+            c.create_rectangle(x - T.px(6), y - T.px(14), x + wid + T.px(34), y + T.px(18), fill="",
                                outline="", tags=tags + (tag,))
-            t = c.create_text(x, y, text=label, font=font, fill=T.AMBER if on else T.MUTED, anchor="w",
+            t = c.create_text(x, y, text=label, font=font, fill=T.TEXT if on else T.MUTED, anchor="w",
                               tags=tags + (tag,))
             if f != "all" and n[f]:
                 colour = {"update": T.AMBER, "needs a look": T.WARN, "working": T.OK}.get(f, T.DIM)
-                c.create_text(x + wid + T.px(8), y, text=str(n[f]), font=T.mono(10, True),
+                c.create_text(x + wid + T.px(8), y, text=str(n[f]), font=T.mono(11, True),
                               fill=colour, anchor="w", tags=tags + (tag,))
-                wid += T.px(8) + T.width(str(n[f]), T.mono(10, True))
+                wid += T.px(8) + T.width(str(n[f]), T.mono(11, True))
             if on:
-                c.create_rectangle(x, y + T.px(13), x + T.width(label, font), y + T.px(15), fill=T.AMBER,
+                c.create_rectangle(x - T.px(2), y + T.px(17), x + wid + T.px(2), y + T.px(22), fill=T.AMBER,
                                    outline="", tags=tags)
             else:
                 k.hover(tag, lambda t=t: c.itemconfigure(t, fill=T.TEXT),
@@ -159,9 +152,7 @@ class LibraryPage(Page):
                           tags=tags)
         # scanning line
         if a.scanning:
-            c.create_rectangle(pad, y + T.px(26), width - pad, y + T.px(28), fill=T.SURF, outline="",
-                               tags=tags)
-            self._bar = c.create_rectangle(pad, y + T.px(26), pad + T.px(120), y + T.px(28), fill=T.AMBER,
+            self._bar = c.create_rectangle(pad, y + T.px(17), pad + T.px(120), y + T.px(22), fill=T.AMBER,
                                            outline="", tags=tags)
             self._sweep()
         top = self.header_h
@@ -171,10 +162,10 @@ class LibraryPage(Page):
         for i, g in enumerate(shown):
             r, col = divmod(i, cols)
             x = int(pad + col * (cw + gap))
-            yy = top + r * (ch + T.px(64))
+            yy = top + r * (ch + self.TAG_H + T.px(34))
             self._card(i, g, x, yy, cw, ch)
         rows = (len(shown) + cols - 1) // cols
-        foot = top + rows * (ch + T.px(64)) + T.px(10)
+        foot = top + rows * (ch + self.TAG_H + T.px(34)) + T.px(10)
         # only what the person can act on: games that are hidden (and where to get them back)
         if n["hidden"] and not a.show_hidden:
             c.create_text(pad, foot, text=f"{n['hidden']} hidden  \u00b7  view shows them",
@@ -235,7 +226,19 @@ class LibraryPage(Page):
         return top + T.px(160)
 
     # ------------------------------------------------------------ a card
+    @property
+    def TAG_H(self) -> int:
+        return T.px(62)
+
+    # A swatch beside the status words, never the message itself.
+    PATCH = {"working": "#3f8f55", "update": "#2c78a8", "look": "#c4492b", "unsupported": "#c4492b",
+             "installed": "#58594f", "anticheat": "#58594f", "ready": "#b9b3a2", "reading": "#b9b3a2"}
+    NAME_HOT = "#1d5f86"
+
     def _card(self, i, g, x, y, cw, ch):
+        """A specimen: the cover (or a lettered plate) with its paper tag hung
+        underneath. The tag carries the name, a status swatch with its words,
+        and the bitness."""
         c, k, a = self.c, self.kit, self.app
         # bound through a tag of its own: "card{i}" is reused by every redraw,
         # and its bindings piled up on the next grid's card of that number.
@@ -244,37 +247,52 @@ class LibraryPage(Page):
         tags = ("page", "grid", tag, f"card{i}")
         info = a.card(g)
         cov = a.cover(g, cw, ch)
-        items = {"ring": c.create_rectangle(x - T.px(4), y - T.px(4), x + cw + T.px(4), y + ch + T.px(4),
+        th, cut, ins = self.TAG_H, T.px(12), T.px(12)
+        dim = bool(info["dim"])
+        items = {"ring": c.create_rectangle(x - T.px(5), y - T.px(5), x + cw + T.px(5), y + ch + th + T.px(5),
                                             outline="", width=T.px(2), tags=tags)}
         levels = []
         if cov and cov["kind"] == "cover":
-            levels = [cov["dim"]] if info["dim"] else cov["levels"]
+            levels = [cov["dim"]] if dim else cov["levels"]
             items["img"] = c.create_image(x, y, image=levels[0], anchor="nw", tags=tags)
         else:
-            c.create_rectangle(x, y, x + cw, y + ch, fill=T.SURF, outline="", tags=tags)
+            # no cover: the plate is a lettered specimen of the game's own name
+            c.create_rectangle(x, y, x + cw, y + ch, fill=T.SURF, outline=T.LINE, tags=tags)
             if cov and cov["kind"] == "icon" and cov["levels"]:
                 c.create_image(x + cw / 2, y + ch / 2 - T.px(12), image=cov["levels"][0], tags=tags)
             else:
-                c.create_text(x + cw / 2, y + ch / 2 - T.px(12), text=T.GLYPH["game"], font=T.icons(30),
-                              fill=T.LINE, tags=tags)
-        accent = (cov or {}).get("accent") or T.AMBER
-        name_col = T.DIM if info["dim"] else T.TEXT
-        nx = x
-        if info["dot"]:
-            c.create_oval(x, y + ch + T.px(15), x + T.px(8), y + ch + T.px(23), fill=info["colour"],
-                          outline="", tags=tags)
-            nx = x + T.px(16)
-        items["name"] = c.create_text(nx, y + ch + T.px(19), text=T.fit(g.name, T.mono(10, True), x + cw - nx),
-                                      font=T.mono(10, True), fill=name_col, anchor="w", tags=tags)
-        if info["status"]:
-            c.create_text(x, y + ch + T.px(41), text=T.fit(info["status"], T.mono(8), cw), font=T.mono(8),
-                          fill=info["colour"], anchor="w", tags=tags)
-        self.cards.append({"g": g, "tag": tag, "items": items, "levels": levels, "accent": accent,
-                           "name_col": name_col})
+                words = [w for w in re.split(r"[^A-Za-z0-9]+", g.name) if w]
+                letters = "".join(w[0] for w in words[:2]).upper() or "?"
+                c.create_text(x + T.px(14), y + T.px(14), text=T.api_name(getattr(g, "api", None)).upper(),
+                              font=T.label(9), anchor="nw", fill=T.DIM, tags=tags)
+                c.create_text(x + T.px(12), y + ch - T.px(18), text=letters, font=T.display(66), anchor="sw",
+                              fill=T.LINE if dim else T.MUTED, tags=tags)
+            k.ruler(x + 1, x + cw - 1, y + ch - T.px(2), tags=tags, down=False)
+        c.create_polygon(x, y + ch, x + cw, y + ch, x + cw, y + ch + th - cut, x + cw - cut, y + ch + th,
+                         x, y + ch + th, fill=mix(T.PAPER, T.BG, 0.42) if dim else T.PAPER, outline="",
+                         tags=tags)
+        items["name"] = c.create_text(x + ins, y + ch + T.px(19),
+                                      text=T.fit(g.name, T.mono(10, True), cw - 2 * ins),
+                                      font=T.mono(10, True), fill=T.INK, anchor="w", tags=tags)
+        sy = y + ch + T.px(43)
+        c.create_rectangle(x + ins, sy - T.px(4), x + ins + T.px(8), sy + T.px(4),
+                           fill=self.PATCH.get(info["kind"], "#b9b3a2"), outline="", tags=tags)
+        bits = getattr(g, "bitness", None)
+        right = T.label(9)
+        rtext = f"{bits}-bit" if bits else ""
+        rw = T.width(rtext, right) + T.px(10) if rtext else 0
+        said = info["status"] or T.api_name(getattr(g, "api", None))
+        c.create_text(x + ins + T.px(16), sy, text=T.fit(said, T.mono(9), cw - 2 * ins - T.px(16) - rw),
+                      font=T.mono(9), fill=T.INK_SOFT if not dim else T.INK, anchor="w", tags=tags)
+        if rtext:
+            c.create_text(x + cw - ins - cut / 2, sy, text=rtext, font=right, fill=T.INK_SOFT if not dim else T.INK,
+                          anchor="e", tags=tags)
+        self.cards.append({"g": g, "tag": tag, "items": items, "levels": levels, "accent": T.AMBER,
+                           "name_col": T.INK})
         key = str(g.folder)
         self.heat[key] = 0.0
         # not while the wheel is moving the page: every cover passing under
-        # the pointer would light up and pull the glow along
+        # the pointer would light up
         k.hover(tag, lambda i=i: None if self.shell.scrolling() else self._select(i))
         k.on_click(tag, lambda g=g: a.open_game(g))
         # through the kit, which forgets it with the card: a bare tag_bind left
@@ -307,8 +325,8 @@ class LibraryPage(Page):
             self.heat[key] = h
             if levels and "img" in items:
                 c.itemconfigure(items["img"], image=levels[round(h * (len(levels) - 1))])
-            c.itemconfigure(items["ring"], outline=mix(T.BG, card["accent"], h) if h > 0.02 else "")
-            c.itemconfigure(items["name"], fill=mix(card["name_col"], card["accent"], h))
+            c.itemconfigure(items["ring"], outline=mix(T.BG, T.AMBER, h) if h > 0.02 else "")
+            c.itemconfigure(items["name"], fill=mix(card["name_col"], self.NAME_HOT, h))
         self.shell.motion.run(card["tag"], ms or (220 if to else 320), step)
 
     def _set_glow(self, colour, alpha):
@@ -323,6 +341,7 @@ class LibraryPage(Page):
             pass
 
     def _glow_to(self, colour, alpha=34):
+        return          # the page no longer tints towards a hovered cover
         c0, a0 = self.glow_now
 
         def step(k):

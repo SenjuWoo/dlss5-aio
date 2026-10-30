@@ -708,7 +708,7 @@ if ($Apply -or $Restore -or $SelfTest) {
     }
 }
 $roots = Get-ScanRoots -r $Roots
-Write-RefresherLog ('DLSS5AIO refresher 2.0.2; Apply={0}; Restore={1}; SkipNR={2}; ForceOnline={3}; Roots={4}; Source={5}' -f $Apply, $Restore, $SkipNR, $ForceOnline, ($roots -join ','), $SourceDir)
+Write-RefresherLog ('DLSS5AIO refresher 2.1.0; Apply={0}; Restore={1}; SkipNR={2}; ForceOnline={3}; Roots={4}; Source={5}' -f $Apply, $Restore, $SkipNR, $ForceOnline, ($roots -join ','), $SourceDir)
 if ($Restore) {
     try {
         Write-Host "`nRestoring originals under: $($roots -join ', ')" -ForegroundColor Cyan

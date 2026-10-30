@@ -390,6 +390,26 @@ class Kit:
         self.tip(tag, tip)
         return tag, wid
 
+    def ruler(self, x1, x2, y, tags=(), colour=None, major_colour=None, step=8, every=5, down=True):
+        """A scale bar: a hairline with a tick every `step` px and a longer one
+        every `every`th. Three canvas items, however wide: each row of ticks is
+        one polyline that climbs a tick and steps back down."""
+        c = self.c
+        step_px, tag = T.px(step), tuple(tags)
+        colour = colour or T.LINE
+        major_colour = major_colour or T.DIM
+        sign = 1 if down else -1
+        ids = [c.create_line(x1, y, x2, y, fill=colour, tags=tag)]
+        for length, every_n, col in ((T.px(5), 1, colour), (T.px(10), every, major_colour)):
+            pitch = step_px * every_n
+            pts, x = [], x1
+            while x <= x2:
+                pts += [x, y, x, y + sign * length, x, y]     # up the tick and back down
+                x += pitch
+            if len(pts) >= 4:
+                ids.append(c.create_line(*pts, fill=col, tags=tag))
+        return ids
+
     # ------------------------------------------------------------ buttons
     def button(self, x, y, w, label, cmd=None, glyph=None, kind="secondary",
                accent=T.AMBER, h=None, tags=(), enabled=True, tip="", size=11):
@@ -438,23 +458,25 @@ class Button:
         self.enabled = enabled
         self.progress = None
         tags = (self.tag,) + tuple(tags)
-        self.box = self.c.create_rectangle(x, y, x + w, y + h, outline="", tags=tags)
+        # a tag: the top-right corner is clipped, the one shape every action wears
+        self.box = self.c.create_polygon(T.tag_points(x, y, x + w, y + h, min(T.px(9), h // 3)),
+                                         outline="", tags=tags)
         self.bar = self.c.create_rectangle(x, y + h - T.px(3), x, y + h, outline="",
                                            fill="", tags=tags)
-        f = T.mono(size, kind in ("primary", "danger"))
+        f = T.label(size + 1) if label else T.mono(size)
         self.icon = None
         if glyph and label:
             tw = T.width(label, f) + T.px(26)
             left = x + max(T.px(18), (w - tw) / 2)
             self.icon = self.c.create_text(left, y + h / 2, text=T.GLYPH.get(glyph, glyph),
                                            font=T.icons(size + 1), anchor="w", tags=tags)
-            self.label = self.c.create_text(left + T.px(26), y + h / 2, text=label, font=f,
+            self.label = self.c.create_text(left + T.px(26), y + h / 2, text=label.upper(), font=f,
                                             anchor="w", tags=tags)
         elif glyph:
             self.label = self.c.create_text(x + w / 2, y + h / 2, text=T.GLYPH.get(glyph, glyph),
                                             font=T.icons(size + 2), tags=tags)
         else:
-            self.label = self.c.create_text(x + w / 2, y + h / 2, text=label, font=f, tags=tags)
+            self.label = self.c.create_text(x + w / 2, y + h / 2, text=label.upper(), font=f, tags=tags)
         self._paint(False)
         kit.hover(self.tag, lambda: self._paint(True), lambda: self._paint(False))
         kit.on_click(self.tag, self._click)
@@ -483,7 +505,8 @@ class Button:
     def _paint(self, hot):
         fill, ink = self._colours(hot and self.enabled)
         try:
-            self.c.itemconfigure(self.box, fill=fill)
+            self.c.itemconfigure(self.box, fill=fill,
+                                 outline=T.LINE if self.kind == "secondary" and self.enabled else "")
             self.c.itemconfigure(self.label, fill=ink)
             if self.icon:
                 self.c.itemconfigure(self.icon, fill=ink)
@@ -496,7 +519,7 @@ class Button:
 
     def set(self, label=None, enabled=None, progress=-1):
         if label is not None:
-            self.c.itemconfigure(self.label, text=label)
+            self.c.itemconfigure(self.label, text=label.upper() if len(label) > 1 else label)
         if enabled is not None:
             self.enabled = enabled
             self._paint(False)
@@ -538,9 +561,8 @@ class Dropdown:
         self.h = T.px(38)
         self.top = top
         self.box = self.c.create_rectangle(x, top, x + w, top + self.h, fill=T.SURF,
-                                           outline="", tags=tags)
-        self.edge = self.c.create_rectangle(x, top, x + T.px(3), top + self.h, outline="",
-                                            fill="", tags=tags)
+                                           outline=T.LINE, tags=tags)
+        self.edge = self.box          # a changed value outlines the whole box in the accent
         self.lbl = self.c.create_text(x + T.px(14), top + self.h / 2, anchor="w",
                                       font=T.mono(10), tags=tags)
         self.hint = self.c.create_text(x + w - T.px(30), top + self.h / 2, anchor="e",
@@ -570,7 +592,7 @@ class Dropdown:
         col = T.DIM if not self.enabled else (self.accent if self.changed else T.TEXT)
         self.c.itemconfigure(self.lbl, text=T.fit(text, f, room), font=f, fill=col)
         self.c.itemconfigure(self.hint, text="")
-        self.c.itemconfigure(self.edge, fill=self.accent if self.changed and self.enabled else "")
+        self.c.itemconfigure(self.edge, outline=self.accent if self.changed and self.enabled else T.LINE)
         self.c.itemconfigure(self.arrow, fill=T.DIM if self.enabled else T.SURF2)
 
     def _hot(self, on):
@@ -675,7 +697,8 @@ class Slider:
         self.fill = self.c.create_rectangle(x, y - t / 2, x, y + t / 2, outline="", tags=tags)
         r = T.px(9)
         self.r = r
-        self.knob = self.c.create_oval(x - r, y - r, x + r, y + r, outline="", tags=tags)
+        # a ruler cursor: a narrow upright bar, not a round thumb
+        self.knob = self.c.create_rectangle(x - T.px(3), y - r, x + T.px(3), y + r, outline="", tags=tags)
         self.hit = self.c.create_rectangle(x - r, y - T.px(16), x + w + r, y + T.px(16),
                                            fill="", outline="", tags=tags)
         self.c.tag_lower(self.hit, self.track)
@@ -692,7 +715,7 @@ class Slider:
         col = self.accent if self.enabled else T.DIM
         self.c.coords(self.fill, self.x, self.y - t / 2, px_, self.y + t / 2)
         self.c.itemconfigure(self.fill, fill=col)
-        self.c.coords(self.knob, px_ - self.r, self.y - self.r, px_ + self.r, self.y + self.r)
+        self.c.coords(self.knob, px_ - T.px(3), self.y - self.r, px_ + T.px(3), self.y + self.r)
         self.c.itemconfigure(self.knob, fill=col)
 
     def _value_at(self, e):
@@ -747,7 +770,7 @@ class Field:
         self._ph_on = False
         h = T.px(40)
         tags = (self.tag,) + tuple(tags)
-        self.box = self.c.create_rectangle(x, y, x + w, y + h, fill=T.SURF, outline="", tags=tags)
+        self.box = self.c.create_rectangle(x, y, x + w, y + h, fill=T.SURF, outline=T.LINE, tags=tags)
         left = x + T.px(12)
         if glyph:
             kit.glyph(x + T.px(20), y + h / 2, glyph, T.DIM, 11, tags=tags)
@@ -793,7 +816,7 @@ class Field:
 
     def _focus(self, focused: bool):
         self._show_placeholder(not focused)
-        self.c.itemconfigure(self.box, outline=T.LINE if focused else "")
+        self.c.itemconfigure(self.box, outline=T.AMBER if focused else T.LINE)
         self._paint_clear()
 
     def _paint_clear(self):
@@ -889,7 +912,7 @@ class Menu:
         c, tag = self.c, self.tag
         c.delete(tag)
         x, y, w = self.x, self.y, self.w
-        c.create_rectangle(x, y, x + w, y + self.h, fill=T.SURF2, outline=T.LINE, tags=tag)
+        c.create_polygon(T.tag_points(x, y, x + w, y + self.h), fill=T.SURF2, outline=T.LINE, tags=tag)
         visible = self.items[self.offset:self.offset + self.rows]
         for i, item in enumerate(visible):
             idx = self.offset + i

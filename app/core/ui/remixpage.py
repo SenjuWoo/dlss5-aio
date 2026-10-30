@@ -70,8 +70,8 @@ class RemixPage(Page):
         tags = ("page",)
         w = width - 2 * pad
         # the same header as the library: a title, one muted line under it
-        c.create_text(pad, T.px(50), text="remix", font=T.mono(22, True), fill=T.TEXT, anchor="w", tags=tags)
-        c.create_text(pad + T.px(2), T.px(84), text="path-traced classics  \u00b7  dlss 5 runs inside the mod's own "
+        c.create_text(pad, T.px(52), text="remix", font=T.display(34), fill=T.TEXT, anchor="w", tags=tags)
+        c.create_text(pad + T.px(2), T.px(90), text="path-traced classics  \u00b7  dlss 5 runs inside the mod's own "
                                                     "renderer", font=T.mono(10), fill=T.MUTED, anchor="w", tags=tags)
         y = T.px(130)
         y = self._steps(pad, y, w)
@@ -126,8 +126,8 @@ class RemixPage(Page):
         for i, (head, line) in enumerate(steps):
             col, row = i % cols, i // cols
             sx, sy = x + col * (cw + gap), y + row * (h + gap)
-            c.create_rectangle(sx, sy, sx + cw, sy + h, fill=T.SURF, outline="", tags=tags)
-            c.create_text(sx + T.px(22), sy + h / 2, text=str(i + 1), font=T.mono(18, True), fill=T.AMBER,
+            c.create_polygon(T.tag_points(sx, sy, sx + cw, sy + h, T.px(10)), fill=T.SURF, outline=T.LINE, tags=tags)
+            c.create_text(sx + T.px(22), sy + h / 2, text=str(i + 1), font=T.display(26), fill=T.AMBER,
                           anchor="w", tags=tags)
             c.create_text(sx + T.px(58), sy + T.px(24), text=head, font=T.mono(10, True), fill=T.TEXT, anchor="w",
                           tags=tags)
@@ -153,8 +153,7 @@ class RemixPage(Page):
         tags = ("page",)
         cw, ch = T.px(76), T.px(114)
         h = ch + T.px(20)
-        c.create_rectangle(x, y, x + w, y + h, fill=T.SURF, outline="", tags=tags)
-        c.create_rectangle(x, y, x + T.px(3), y + h, fill=T.OK, outline="", tags=tags)
+        c.create_polygon(T.tag_points(x, y, x + w, y + h, T.px(12)), fill=T.SURF, outline=T.LINE, tags=tags)
         cov = a.cover(g, cw, ch)
         if cov and cov.get("kind") == "cover" and cov.get("levels"):
             c.create_image(x + T.px(18), y + T.px(10), image=cov["levels"][-1], anchor="nw", tags=tags)
@@ -209,7 +208,7 @@ class RemixPage(Page):
             tx, ty = x + col * (tw + gap), y + row * (th + gap)
             tag = k.uid("mod")
             tags = ("page", tag)
-            box = c.create_rectangle(tx, ty, tx + tw, ty + th, fill=T.SURF, outline="", tags=tags)
+            box = c.create_polygon(T.tag_points(tx, ty, tx + tw, ty + th, T.px(10)), fill=T.SURF, outline=T.LINE, tags=tags)
             name = c.create_text(tx + T.px(18), ty + T.px(24), text=T.fit(m.game, T.mono(10, True), tw - T.px(56)),
                                  font=T.mono(10, True), fill=T.TEXT, anchor="w", tags=tags)
             c.create_text(tx + T.px(18), ty + T.px(46), text=T.fit(m.mod, T.mono(9), tw - T.px(36)), font=T.mono(9),

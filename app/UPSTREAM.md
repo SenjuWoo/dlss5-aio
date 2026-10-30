@@ -1,9 +1,11 @@
 # Game installer provenance
 
-The game installation engine and interface are adapted from the MIT-licensed
+The game installation engine and the window's structure are adapted from the MIT-licensed
 [DLSS5-Autopilot](https://github.com/Kizzuwatnaa/DLSS5-Autopilot) at commit
 `f7e347c6493361e30c6609f40be66ee2e77677ce` (2026-10-14), version 2.0.8.
 Its copyright and license are retained in `UPSTREAM-LICENSE.txt`.
+Since 2.1.0 the visual design (palette, type, navigation, controls, icon and page
+layouts) is original to DLSS 5 AIO; see `DESIGN.md`.
 
 DLSS 5 AIO separates its profile, cache, log, application mutex and updater from
 Autopilot. Existing Autopilot preferences are neither imported nor overwritten.

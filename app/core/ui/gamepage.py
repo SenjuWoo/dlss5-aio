@@ -110,9 +110,7 @@ class GamePage(Page):
         # peek, not find: find walks Steam's libraries and reads the cover,
         # and draw runs on the Tk thread on every redraw. The backdrop worker
         # has called find by the time its picture lands and redraws.
-        known = art.peek(g)
-        if known is not None and known.accent:
-            accent = known.accent
+        # one action colour for every game: a page tinted by its cover broke the system
         self.accent = accent
         if bd and bd["frames"]:
             band, logo = bd["band"], bd["logo"]
@@ -123,7 +121,7 @@ class GamePage(Page):
                 self.shell.motion.run("backdrop", 420, lambda kk: c.itemconfigure(
                     item, image=frames[min(len(frames) - 1, int(kk * len(frames)))]))
         else:
-            band = max(T.px(260), int(width * 0.2))
+            band = max(T.px(200), int(width * 0.14))
         # a real button, readable over any art: the small link read as part of the picture
         back = k.button(pad, T.px(22), T.px(128), "games", self.shell.home, glyph="back", h=T.px(38),
                         tags=tags, size=10, tip="back to your games  (esc)")
@@ -137,10 +135,10 @@ class GamePage(Page):
         # the name, unless the art carries the game's own logo
         y = band - T.px(10)
         if not logo:
-            title_font = T.mono(30 if width > T.px(900) else 22, True)
-            c.create_text(pad, band - T.px(70), text=T.fit(g.name, title_font, width - 2 * pad), font=title_font,
+            title_font = T.display(46 if width > T.px(900) else 32)
+            c.create_text(pad, band - T.px(64), text=T.fit(g.name, title_font, width - 2 * pad), font=title_font,
                           fill=T.TEXT, anchor="w", tags=tags)
-        # chips: api, bits, store, route and how far it can be trusted
+        # chips, as small paper tags: api, bits, store, route and how far it can be trusted
         x = pad
         y = band + T.px(8)
         chips = [T.api_name(g.api), g.bit_label if g.bitness else "?-bit", str(g.source)]
@@ -148,15 +146,20 @@ class GamePage(Page):
             lvl = a.level()
             chips.append(f"{a.route}  \u00b7  {lvl}" if lvl else a.route)
         for i, label in enumerate(chips):
-            f = T.mono(9)
-            wid = T.width(label, f) + T.px(22)
-            colour = T.MUTED
-            if i == 3:
-                colour = {installer.STABLE: T.OK, installer.BETA: T.AMBER}.get(a.level(), T.WARN)
-            c.create_rectangle(x, y, x + wid, y + T.px(26), fill=T.SURF, outline=T.LINE, tags=tags)
-            c.create_text(x + wid / 2, y + T.px(13), text=label, font=f, fill=colour, tags=tags)
+            f = T.label(10)
+            text = label.upper()
+            patch = i == 3
+            wid = T.width(text, f) + T.px(26) + (T.px(16) if patch else 0)
+            c.create_polygon(T.tag_points(x, y, x + wid, y + T.px(28), T.px(7)), fill=T.PAPER, outline="",
+                             tags=tags)
+            tx = x + T.px(13)
+            if patch:
+                colour = {installer.STABLE: "#3f8f55", installer.BETA: "#2c78a8"}.get(a.level(), "#c4492b")
+                c.create_rectangle(tx, y + T.px(10), tx + T.px(8), y + T.px(18), fill=colour, outline="", tags=tags)
+                tx += T.px(16)
+            c.create_text(tx, y + T.px(14), text=text, font=f, fill=T.INK, anchor="w", tags=tags)
             x += wid + T.px(8)
-        y += T.px(48)
+        y += T.px(52)
         self._busy_btn = self._busy_text = None
         y = self._status(g, pad, y, width)
         y = self._actions(g, pad, y, width, accent)
@@ -231,7 +234,7 @@ class GamePage(Page):
             dot = colour in (T.OK, T.WARN, T.AMBER)
             x = pad
             if dot:
-                c.create_oval(pad, y - T.px(4), pad + T.px(8), y + T.px(4), fill=colour, outline="", tags=tags)
+                c.create_rectangle(pad, y - T.px(4), pad + T.px(8), y + T.px(4), fill=colour, outline="", tags=tags)
                 x = pad + T.px(18)
             # up to two lines, then an ellipsis: the full text is in the log
             room = width - x - pad
@@ -282,8 +285,8 @@ class GamePage(Page):
         head, rest = self.headline(text)
         w = min(width - 2 * pad, T.px(980))
         h = T.px(40)
-        c.create_rectangle(pad, y - T.px(4), pad + w, y + h - T.px(4), fill=T.SURF, outline="", tags=tags)
-        c.create_rectangle(pad, y - T.px(4), pad + T.px(3), y + h - T.px(4), fill=colour, outline="", tags=tags)
+        c.create_polygon(T.tag_points(pad, y - T.px(4), pad + w, y + h - T.px(4), T.px(9)), fill=T.SURF,
+                         outline=mix(T.LINE, colour, 0.55) if colour != T.MUTED else T.LINE, tags=tags)
         cy = y + h / 2 - T.px(4)
         k.glyph(pad + T.px(22), cy, glyph, colour, 11, tags=tags)
         hf = T.mono(10, True)
@@ -544,8 +547,8 @@ class GamePage(Page):
             k.button(x, by, bw, label, cmd, glyph=glyph, h=T.px(38), tags=tags, size=10, accent=accent)
             x += bw + T.px(10)
         y = by + T.px(38) + T.px(16)
-        box = c.create_rectangle(pad, top, pad + w, y, fill=mix(T.BG, T.SURF, 0.9), outline=T.LINE, tags=tags)
-        c.create_rectangle(pad, top, pad + T.px(3), y, fill=colour, outline="", tags=tags)
+        box = c.create_polygon(T.tag_points(pad, top, pad + w, y, T.px(12)), fill=mix(T.BG, T.SURF, 0.9),
+                               outline=mix(T.LINE, colour, 0.6), tags=tags)
         c.tag_lower(box, "result")
         for item in c.find_withtag("backdrop"):
             c.tag_lower(item)
@@ -582,8 +585,8 @@ class GamePage(Page):
             if box:
                 bottom = max(bottom, box[3] + T.px(14))
         y = bottom
-        box = c.create_rectangle(pad, top, pad + w, y, fill=mix(T.BG, T.SURF, 0.9), outline=T.LINE, tags=tags)
-        c.create_rectangle(pad, top, pad + T.px(3), y, fill=T.AMBER, outline="", tags=tags)
+        box = c.create_polygon(T.tag_points(pad, top, pad + w, y, T.px(12)), fill=mix(T.BG, T.SURF, 0.9),
+                               outline=mix(T.LINE, T.AMBER, 0.6), tags=tags)
         c.tag_lower(box)
         for item in c.find_withtag("backdrop"):
             c.tag_lower(item)

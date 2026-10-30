@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.1.0 - 2026-10-30
+- New visual identity, replacing the look inherited from Autopilot: a conservation-record design. Neutral studio-grey ground, paper accession tags for games and chips, a scale-bar ruler for navigation and filters, vendor swatches (NVIDIA, AMD, Intel) in the runtime ledger, DIN-style Bahnschrift type, tag-shaped clipped-corner buttons, cyanotype blue as the single action colour and vermilion for risk only.
+- Navigation moves from the left icon rail to a top bar with the pages set on the ruler; the log, help and watch controls keep their places on the right and bottom.
+- Library, runtime updates, game, remix and VR pages recomposed; covers missing from a game show a lettered specimen plate instead of a controller icon. The page tint that followed the hovered cover is gone.
+- New application icon and logo. Behaviour, safety logic, recovery and tests are unchanged.
+
 ## 2.0.2 - 2026-10-29
 - Ship a one-folder build (`DLSS5-AIO.exe` + `_internal`) instead of a self-extracting single file. The 2.0.1 single-file EXE was blocked by Microsoft Defender (`Trojan:Win32/Suschil!rfn` on the ZIP, `Wacatac.B!ml`/`Contebrew.A!ml` on the EXE); these were false positives from the packed-executable layout. The one-folder build scans clean. No standalone EXE asset is published any more.
 - Fix self-update on current Windows builds: the swap helper is now launched as `.\swap.bat` because `cmd /c <bare name>` no longer resolves from the working directory.

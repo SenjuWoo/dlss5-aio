@@ -5,3 +5,4 @@ dist/
 outputs/
 *.spec.bak
 .venv/
+.impeccable/

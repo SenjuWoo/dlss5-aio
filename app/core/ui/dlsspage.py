@@ -9,6 +9,7 @@ again on its own when that is old or the library has new games.
 """
 from __future__ import annotations
 
+import re
 import time
 
 from .. import dlssupdate as du
@@ -63,7 +64,7 @@ class DlssPage(Page):
         rows = a.dlss_rows()
         todo = a.dlss_todo()
         busy = bool(a.dlss_job or a.dlss_scanning)
-        c.create_text(pad, T.px(58), text="runtime updates", font=T.mono(24, True), fill=T.TEXT, anchor="w", tags=tags)
+        c.create_text(pad, T.px(56), text="runtime updates", font=T.display(34), fill=T.TEXT, anchor="w", tags=tags)
         right = width - pad
         if todo:
             label = f"update all ({len(todo)})"
@@ -224,10 +225,9 @@ class DlssPage(Page):
             h += T.px(24) if result[0] else T.px(44)
         job = a.dlss_job == folder
         free = not (a.dlss_job or a.dlss_scanning or a.busy)
-        # left edge: the accent where there is something to do
-        if r["behind"] and not dim and not r["running"]:
-            c.create_rectangle(pad, top + T.px(8), pad + T.px(3), top + h - T.px(8), fill=T.AMBER, outline="",
-                               tags=tags)
+        # the record sits on a plate; the update button is what marks it as behind
+        c.create_polygon(T.tag_points(pad, top, width - pad, top + h - T.px(6), T.px(12)), fill=T.SURF,
+                         outline=T.LINE, tags=tags)
         # a small cover, when one is already cached (it is read on a worker)
         tw, th = T.px(48), T.px(72)
         tx = pad + T.px(16)
@@ -238,15 +238,16 @@ class DlssPage(Page):
         if cov and cov.get("levels"):
             img = cov.get("dim") if dim and cov.get("dim") else cov["levels"][min(2, len(cov["levels"]) - 1)]
             if cov.get("kind") == "icon":
-                c.create_rectangle(tx, top + T.px(12), tx + tw, top + T.px(12) + th, fill=T.SURF, outline="",
+                c.create_rectangle(tx, top + T.px(12), tx + tw, top + T.px(12) + th, fill=T.SURF2, outline=T.LINE,
                                    tags=tags)
                 c.create_image(tx + tw / 2, top + T.px(12) + th / 2, image=img, tags=tags)
             else:
                 c.create_image(tx, top + T.px(12), image=img, anchor="nw", tags=tags)
         else:
-            c.create_rectangle(tx, top + T.px(12), tx + tw, top + T.px(12) + th, fill=T.SURF, outline="", tags=tags)
-            c.create_text(tx + tw / 2, top + T.px(12) + th / 2, text=T.GLYPH["game"], font=T.icons(14),
-                          fill=T.LINE, tags=tags)
+            c.create_rectangle(tx, top + T.px(12), tx + tw, top + T.px(12) + th, fill=T.SURF2, outline=T.LINE, tags=tags)
+            letters = "".join(w[0] for w in re.split(r"[^A-Za-z0-9]+", g.name) if w)[:2].upper() or "?"
+            c.create_text(tx + tw / 2, top + T.px(12) + th / 2, text=letters, font=T.display(20),
+                          fill=T.DIM, tags=tags)
         x = tx + tw + T.px(22)
         bw = T.px(170)
         room = width - pad - bw - T.px(24) - x
@@ -317,13 +318,19 @@ class DlssPage(Page):
             k.link(bx + T.px(4), by + T.px(62), "restore original", lambda: a.dlss_restore(g) if free else None,
                    glyph="back", colour=T.MUTED if free else T.DIM, tags=tags,
                    tip="puts the game's own files back")
-        c.create_line(pad + T.px(16), top + h, width - pad, top + h, fill=T.LINE, tags=tags)
         return top + h + T.px(10), waiting
 
     def _entry_line(self, e, new, x, y, room, dim, copies=1):
         c = self.c
         tags = ("page",)
-        f = T.mono(9)
+        f = T.mono(10)
+        fam = e.family
+        vendor = "nvidia" if fam.startswith("dlss") else ("intel" if fam.startswith(("xess", "xell")) else "amd")
+        colour = T.VENDOR[vendor][0]
+        c.create_rectangle(x, y - T.px(5), x + T.px(10), y + T.px(5), fill=colour if not dim else T.LINE,
+                           outline="", tags=tags)
+        x += T.px(22)
+        room -= T.px(22)
         c.create_text(x, y, text=SHORT[e.family], font=f, fill=T.DIM if dim else T.MUTED, anchor="w", tags=tags)
         vx = x + max(T.width(label, f) for label in SHORT.values()) + T.px(22)
         if e.state == du.MISSING:
@@ -347,7 +354,7 @@ class DlssPage(Page):
         if not new and e.state not in (du.MISSING, du.INSTALL):
             parts.append(("   no verified compatible update", T.DIM))
         if du.outdated(e, new):
-            parts.append(("  ->  " + new.get("version", ""), T.DIM if dim else T.AMBER))
+            parts.append(("  \u2192  " + new.get("version", ""), T.DIM if dim else T.AMBER))
         if e.state == du.UPDATED:
             if e.backup is not None:
                 parts.append((f"   game's own {e.original} kept" if e.original else "   game's own kept", T.DIM))

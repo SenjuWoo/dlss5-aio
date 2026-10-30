@@ -66,10 +66,10 @@ class Shell:
             pass
 
         self.motion = Motion(root)
-        self.rail_c = tk.Canvas(root, width=T.px(84), bg=T.RAIL, highlightthickness=0)
-        self.rail_c.pack(side="left", fill="y")
+        self.rail_c = tk.Canvas(root, height=T.px(self.BAR_H), bg=T.RAIL, highlightthickness=0)
+        self.rail_c.pack(side="top", fill="x")
         right = tk.Frame(root, bg=T.BG)
-        right.pack(side="left", fill="both", expand=True)
+        right.pack(side="top", fill="both", expand=True)
         self.banner_c = tk.Canvas(right, height=0, bg=T.BG, highlightthickness=0)
         self.banner_c.pack(side="top", fill="x")
         self.bottom_c = tk.Canvas(right, height=T.px(34), bg=T.BG, highlightthickness=0)
@@ -343,153 +343,87 @@ class Shell:
                         ("games > view > sidebar pages brings it back", lambda: None, False)],
                        f"nav_{page}", T.px(440), max_rows=2)
 
-    # The rail's shapes, roomiest first; draw_rail takes the first one that
-    # fits the window's height. One fixed layout needed 580 px at 100%, so
-    # at 175% on a 1080p laptop, or in any window dragged shorter, the pages
-    # ran down into watch and help and a click on video landed on watch.
-    #   pages:  labels, logo, logo y, first y, step, hit above, hit below,
-    #           glyph size, glyph dy, label dy
-    #   bottom: watch and help (from the bottom), hit above, hit below watch,
-    #           hit below help, label dy, glyph dy
-    RAIL_SHAPES = (
-        ((True, True, 42, 122, 72, 28, 32, 17, -4, 20), (116, 52, 22, 34, 30, 22, 0)),
-        ((True, True, 30, 88, 56, 23, 27, 14, -9, 18), (92, 40, 18, 28, 26, 17, -3)),
-        ((False, True, 30, 80, 42, 19, 19, 15, 0, 0), (62, 24, 18, 18, 18, 0, 0)),
-        ((False, False, 0, 26, 42, 19, 19, 15, 0, 0), (62, 24, 18, 18, 18, 0, 0)),
-    )
-    RAIL_GAP = 6                     # between the last page and watch
-
-    @classmethod
-    def rail_shape(cls, h: int, n: int):
-        """(page shape, bottom shape, pages drawn) for a rail `h` px tall with
-        `n` pages. Past the last shape the pages that do not fit go behind a
-        "more" item, so nothing is ever drawn on top of anything else."""
-        for top, bottom in cls.RAIL_SHAPES:
-            last = top[3] + (n - 1) * top[4] + top[6]
-            if T.px(last + cls.RAIL_GAP) <= h - T.px(bottom[0] + bottom[2]):
-                return top, bottom, n
-        top, bottom = cls.RAIL_SHAPES[-1]
-        room = h - T.px(bottom[0] + bottom[2] + cls.RAIL_GAP + top[3] + top[6])
-        fits = max(1, room // max(1, T.px(top[4])) + 1)
-        return top, bottom, min(n, fits)
+    BAR_H = 64                       # the ruler bar's height, in 96-DPI px
 
     def draw_rail(self) -> None:
+        """The bar across the top: the mark, the pages set on a ruler, then
+        watch and help. The active page is a paper tag; the scale runs under
+        all of it. (Named `rail` for the callers and tests that predate it.)"""
         c = self.rail_c
         k = self.rail_kit
         c.delete("all")
-        self.content.delete("rail_hint")
-        rw = T.px(84)
-        h = c.winfo_height()
-        if h <= 1:                   # not laid out yet; <Configure> draws it again
-            h = T.px(600)
-        c.create_line(rw - 1, 0, rw - 1, h, fill=T.LINE)
+        w = c.winfo_width()
+        if w <= 1:                   # not laid out yet; <Configure> draws it again
+            w = T.px(1280)
+        h = T.px(self.BAR_H)
         active = self.RAIL_ITEMS[self.page.rail if self.page is not None else 0][0]
         hidden = self.rail_hidden()
         shown = [it for it in self.RAIL_ITEMS if it[0] not in hidden]
-        top, bottom, fits = self.rail_shape(h, len(shown))
-        labels, logo, logo_y, first, step, up, down, gsize, gdy, ldy = top
-        more = []
-        if fits < len(shown):
-            shown, more = shown[:fits - 1], shown[fits - 1:]
-        if logo:
-            try:
-                img = getattr(self, "_logo", None)
-                if img is None:
-                    from . import imaging
-                    buf = imaging.picture(win.ico_path(), T.px(36), T.px(36), bg=T.RAIL, cover=False)
-                    if buf:
-                        img = self._logo = imaging.photo(tk, buf, T.px(36), T.px(36), c)
-                if img is not None:
-                    c.create_image(rw / 2, T.px(logo_y), image=img, tags="logo")
-                    k.hover("logo")
-                    k.on_click("logo", self._rail_nav("library"))
-            except Exception:
-                pass
-        items = [(p, g, lb, self._rail_nav(p)) for p, g, lb in shown]
-        if more:
-            items.append(("more", "more", "more", lambda more=more: self._rail_more(more)))
-        for i, (page, glyph, label, go) in enumerate(items):
-            y = T.px(first + i * step)
-            on = page == active or (page == "more" and active in [m[0] for m in more])
+        mid = T.px(28)
+        # the scale: a hairline on the bar's lower edge with ticks rising from it
+        k.ruler(0, w, h - T.px(1), colour=T.LINE, major_colour=T.DIM, down=False)
+        # mark and name
+        x = T.px(24)
+        logo = None
+        try:
+            logo = getattr(self, "_logo", None)
+            if logo is None:
+                from . import imaging
+                buf = imaging.picture(win.ico_path(), T.px(34), T.px(34), bg=T.RAIL, cover=False)
+                if buf:
+                    logo = self._logo = imaging.photo(tk, buf, T.px(34), T.px(34), c)
+        except Exception:
+            logo = None
+        if logo is not None:
+            c.create_image(x, mid, image=logo, anchor="w", tags="logo")
+            x += T.px(34) + T.px(12)
+        name = c.create_text(x, mid, text="DLSS 5 AIO", font=T.mono(12, True), fill=T.TEXT, anchor="w",
+                             tags="logo")
+        x = c.bbox(name)[2] + T.px(40)
+        for tag in ("logo",):
+            k.hover(tag)
+            k.on_click(tag, self._rail_nav("library"))
+        # the pages
+        f = T.label(11)
+        for page, _glyph, label in shown:
+            text = label.upper()
+            tw = T.width(text, f)
+            x1, x2 = x, x + tw + T.px(32)
+            y1, y2 = mid - T.px(15), mid + T.px(15)
+            on = page == active
             tag = f"nav_{page}"
-            col = T.TEXT if on else T.DIM
-            c.create_rectangle(T.px(4), y - T.px(up), rw - T.px(4), y + T.px(down), fill=T.RAIL,
-                               outline="", tags=tag)
             if on:
-                c.create_rectangle(0, y - T.px(up - 2), T.px(3), y + T.px(down - 2),
-                                   fill=T.AMBER, outline="")
-            parts = [k.glyph(rw / 2, y + T.px(gdy), glyph, col, gsize, tags=tag)]
-            if labels:
-                parts.append(k.text(rw / 2, y + T.px(ldy), label, col, 8, anchor="center", tags=tag))
-            self._rail_hover(tag, parts, None if on else (T.MUTED, T.DIM), None if labels else label)
-            k.on_click(tag, go)
+                c.create_polygon(T.tag_points(x1, y1, x2, y2, T.px(7)), fill=T.PAPER, outline="", tags=tag)
+            else:
+                c.create_rectangle(x1, y1, x2, y2, fill=T.RAIL, outline="", tags=tag)
+            t = c.create_text((x1 + x2) / 2, mid, text=text, font=f, fill=T.INK if on else T.MUTED, tags=tag)
+            if not on:
+                k.hover(tag, lambda t=t: c.itemconfigure(t, fill=T.TEXT),
+                        lambda t=t: c.itemconfigure(t, fill=T.MUTED))
+            else:
+                k.hover(tag)
+            k.on_click(tag, self._rail_nav(page))
             if page in self.HIDEABLE:
-                k._bind(tag, "<Button-3>", lambda _e, page=page: self._rail_item_menu(page),
-                        role="menu")
-        # watcher and help at the bottom
-        w_off, h_off, bup, wdown, hdown, bldy, bgdy = bottom
+                k._bind(tag, "<Button-3>", lambda _e, page=page: self._rail_item_menu(page), role="menu")
+            x = x2 + T.px(6)
+        # watch and help, right-aligned
+        right = w - T.px(24)
         on, label = self.watching or (False, "watch off")
-        y = h - T.px(w_off)
-        c.create_rectangle(T.px(4), y - T.px(bup), rw - T.px(4), y + T.px(wdown), fill=T.RAIL,
-                           outline="", tags="nav_watch")
-        col = T.OK if on else T.DIM
-        parts = [k.glyph(rw / 2, y + T.px(bgdy), "eye", col, 14, tags="nav_watch")]
-        if labels:
-            parts.append(k.text(rw / 2, y + T.px(bldy), label, col, 7, anchor="center",
-                                tags="nav_watch"))
-        self._rail_hover("nav_watch", parts, None, None if labels else label)
-        k.on_click("nav_watch", lambda: self.on_watch and self.on_watch())
-        y = h - T.px(h_off)
-        c.create_rectangle(T.px(4), y - T.px(bup), rw - T.px(4), y + T.px(hdown), fill=T.RAIL,
-                           outline="", tags="nav_help")
-        parts = [k.glyph(rw / 2, y + T.px(bgdy), "help", T.DIM, 13, tags="nav_help")]
-        if labels:
-            parts.append(k.text(rw / 2, y + T.px(bldy), "help", T.DIM, 7, anchor="center",
-                                tags="nav_help"))
-        self._rail_hover("nav_help", parts, (T.MUTED, T.DIM), None if labels else "help")
-        k.on_click("nav_help", self.open_help)
+        for tag, glyph, text, col, go in (
+                ("nav_help", "help", "help", T.MUTED, self.open_help),
+                ("nav_watch", "eye", label, T.OK if on else T.MUTED, lambda: self.on_watch and self.on_watch())):
+            lf = T.label(10)
+            tw = T.width(text, lf)
+            x2 = right
+            x1 = x2 - tw - T.px(34)
+            c.create_rectangle(x1, mid - T.px(15), x2, mid + T.px(15), fill=T.RAIL, outline="", tags=tag)
+            g = k.glyph(x1 + T.px(14), mid, glyph, col, 11, tags=tag)
+            t = c.create_text(x1 + T.px(28), mid, text=text, font=lf, fill=col, anchor="w", tags=tag)
+            k.hover(tag, lambda g=g, t=t: [c.itemconfigure(i, fill=T.TEXT) for i in (g, t)],
+                    lambda g=g, t=t, col=col: [c.itemconfigure(i, fill=col) for i in (g, t)])
+            k.on_click(tag, go)
+            right = x1 - T.px(6)
         k.prune()
-
-    def _rail_hover(self, tag: str, parts: list, colours, hint) -> None:
-        """Brighten an item under the pointer and, when the rail is too short
-        for words, say its name beside it on the page."""
-        c = self.rail_c
-
-        def enter():
-            if colours:
-                for x in parts:
-                    c.itemconfigure(x, fill=colours[0])
-            if hint:
-                self._rail_hint(tag, hint)
-
-        def leave():
-            if colours:
-                for x in parts:
-                    c.itemconfigure(x, fill=colours[1])
-            self.content.delete("rail_hint")
-        self.rail_kit.hover(tag, enter, leave)
-
-    def _rail_hint(self, tag: str, text: str) -> None:
-        c, r = self.content, self.rail_c
-        c.delete("rail_hint")
-        box = r.bbox(tag)
-        if not box:
-            return
-        y = r.winfo_rooty() + (box[1] + box[3]) / 2 - c.winfo_rooty() + c.canvasy(0)
-        pad = T.px(8)
-        t = c.create_text(c.canvasx(0) + T.px(8) + pad, y, text=text, font=T.mono(9),
-                          fill=T.TEXT, anchor="w", tags="rail_hint")
-        x1, y1, x2, y2 = c.bbox(t)
-        b = c.create_rectangle(x1 - pad, y1 - T.px(4), x2 + pad, y2 + T.px(4), fill=T.SURF2,
-                               outline=T.LINE, tags="rail_hint")
-        c.tag_lower(b, t)
-        c.tag_raise("rail_hint")
-
-    def _rail_more(self, pages) -> None:
-        """The pages a very short rail had no room for, as a menu beside it."""
-        self.kit.close_all()
-        self.rail_menu([(label, self._rail_nav(p)) for p, _g, label in pages],
-                       "nav_more", T.px(260), max_rows=len(pages))
 
     def _rail_nav(self, page):
         def go():
@@ -511,22 +445,17 @@ class Shell:
         self._help_menu = self.rail_menu(items, "nav_help", T.px(300))
 
     def rail_menu(self, items, rail_tag: str, width: int, max_rows: int = 12):
-        """A menu that opens beside the rail item that asked for it, its bottom
-        level with the item's, never under the window's bottom edge.
-
-        Placing it from the bottom of the page by hand let Menu's own "no room
-        below, open upwards" rule fire as well, and the help menu came up half
-        a screen away from the click."""
+        """A menu that drops from the bar item that asked for it - its left
+        edge on the item's, or its right edge on the item's when the item sits
+        near the window's right side."""
         from .kit import Menu
         c, r = self.content, self.rail_c
-        box = r.bbox(rail_tag) or (0, 0, 0, r.winfo_height())
-        # the item's bottom, in the content canvas' own coordinates
-        item_bottom = r.winfo_rooty() + box[3] - c.winfo_rooty() + c.canvasy(0)
-        rows = min(len(items), max_rows)
-        h = rows * T.px(34) + T.px(8)
-        vy1, vy2 = c.canvasy(0), c.canvasy(c.winfo_height())
-        y = max(vy1 + T.px(8), min(item_bottom, vy2 - T.px(8)) - h - 1)
-        Menu(self.kit, c.canvasx(0) + T.px(8), y, items, opener=None, width=width,
+        box = r.bbox(rail_tag) or (0, 0, width, r.winfo_height())
+        shift = r.winfo_rootx() - c.winfo_rootx() + c.canvasx(0)
+        x1, x2 = box[0] + shift, box[2] + shift
+        vx2 = c.canvasx(c.winfo_width())
+        x = x2 - width if x1 + width > vx2 - T.px(8) else x1
+        Menu(self.kit, x, c.canvasy(0) + T.px(8), items, opener=None, width=width,
              current=None, accent=T.AMBER, max_rows=max_rows)
         return self.kit.top()
 
@@ -563,7 +492,7 @@ class Shell:
         self.log_head = head
         self.log_head_kit = Kit(head, self.motion)
         self.log_text = tk.Text(d, bg=T.LOG_BG, fg=T.MUTED, insertbackground=T.MUTED,
-                                font=T.mono(9), borderwidth=0, wrap="word", spacing1=2,
+                                font=T.data(9), borderwidth=0, wrap="word", spacing1=2,
                                 highlightthickness=0, padx=T.px(40), pady=T.px(4))
         self.log_text.pack(side="top", fill="both", expand=True)
         for tag, colour in (("ok", T.OK), ("err", T.WARN), ("warn", T.AMBER), ("head", T.TEXT)):
@@ -740,13 +669,13 @@ class Shell:
         c.delete("all")
         row = T.px(44)
         c.configure(height=row * len(self.banners))
-        w = max(c.winfo_width(), self.root.winfo_width() - T.px(84))
+        w = max(c.winfo_width(), self.root.winfo_width())
         for i, (key, b) in enumerate(self.banners.items()):
             y = i * row
             bg = mix(T.BG, b["colour"], 0.10)
             c.create_rectangle(0, y, w, y + row, fill=bg, outline="")
-            c.create_rectangle(0, y, T.px(3), y + row, fill=b["colour"], outline="")
-            k.text(T.px(44), y + row / 2, b["text"], T.TEXT, 9)
+            c.create_line(0, y + row - 1, w, y + row - 1, fill=b["colour"])
+            k.text(T.px(44), y + row / 2, b["text"], T.TEXT, 10)
             x = w - T.px(44)
             tag, wid = k.link(x, y + row / 2, "", lambda key=key: self.unbanner(key),
                               glyph="close", colour=T.DIM, anchor="e")
@@ -781,8 +710,7 @@ class Shell:
         vy2 = c.canvasy(c.winfo_height())
         x, y = vx2 - w - T.px(28), vy2 - h - T.px(20)
         tags = (tag, "toast")
-        c.create_rectangle(x, y, x + w, y + h, fill=T.SURF2, outline=T.LINE, tags=tags)
-        c.create_rectangle(x, y, x + T.px(3), y + h, fill=accent, outline="", tags=tags)
+        c.create_polygon(T.tag_points(x, y, x + w, y + h), fill=T.SURF2, outline=T.LINE, tags=tags)
         k.glyph(x + T.px(22), y + T.px(26), glyph, accent, 11, anchor="w", tags=tags)
         k.text(x + T.px(46), y + T.px(26), T.fit(title, T.mono(10, True), w - T.px(90)), T.TEXT, 10, True, tags=tags)
         k.link(x + w - T.px(16), y + T.px(24), "", lambda: self._toast_out(tag), glyph="close",
@@ -902,7 +830,7 @@ class Dialog:
             tid = probe.create_text(0, 0, text=self.text, font=f, width=width - T.px(64), anchor="nw")
             x1, y1, x2, y2 = probe.bbox(tid) or (0, 0, 0, 0)
             probe.delete(tid)
-            return T.px(74) + (y2 - y1) + T.px(90) + (T.px(52) if self.entry is not None else 0)
+            return T.px(86) + (y2 - y1) + T.px(90) + (T.px(52) if self.entry is not None else 0)
         h = tall(w)
         # #302: the card was cut to 85% of the WINDOW and a long text lost its
         # end in a small one. The card is its own window: it grows wider first,
@@ -931,13 +859,13 @@ class Dialog:
         c.pack(fill="both", expand=True)
         k = Kit(c)
         c.create_rectangle(0, 0, w - 1, h - 1, outline=T.LINE)
-        c.create_rectangle(0, 0, T.px(3), h, fill=self.accent, outline="")
+        k.ruler(T.px(32), w - T.px(32), T.px(56), colour=self.accent, major_colour=self.accent)
         x = T.px(32)
         if self.glyph:
             k.glyph(x, T.px(38), self.glyph, self.accent, 13, anchor="w")
             x += T.px(28)
         k.text(x, T.px(38), self.title, T.TEXT, 12, True)
-        c.create_text(T.px(32), T.px(66), text=self.text, font=f, fill=T.MUTED, anchor="nw",
+        c.create_text(T.px(32), T.px(78), text=self.text, font=f, fill=T.MUTED, anchor="nw",
                       width=w - T.px(64))
         field = None
         if self.entry is not None:

@@ -1,39 +1,50 @@
 """Colours, type, glyphs and scale for the whole window - one place.
 
-Every screen and dialog takes its look from here, so a colour changed once
-changes everywhere and no dialog drifts into a look of its own.
+The look is a conservation record: objects photographed on a neutral studio
+grey, each carrying a warm paper tag, measured against a ruler. Every screen
+and dialog takes its look from here, so a colour changed once changes
+everywhere and no dialog drifts into a look of its own.
 """
 from __future__ import annotations
 
 import tkinter.font as tkfont
 
-BG = "#0a0b0d"          # window ground
-RAIL = "#0d0e11"        # the navigation rail
-SURF = "#14161a"        # fields, rows, panels
-SURF2 = "#1b1e23"       # buttons, menus, a raised surface
-LINE = "#23272d"        # hairlines, hover on SURF2
-TEXT = "#ece9e2"
-MUTED = "#8c929b"
-DIM = "#5a6069"
-AMBER = "#e6ac50"       # the tool's own accent; a game page uses the game's
-OK = "#86d493"
-WARN = "#ec6f5f"
-LOG_BG = "#08090b"
+BG = "#1b1c1b"          # the studio floor: neutral grey, a hair warm
+RAIL = "#131413"        # the ruler bar across the top
+SURF = "#252725"        # fields, rows, plates
+SURF2 = "#2f312e"       # buttons, menus, a raised surface
+LINE = "#43463f"        # hairlines, hover on SURF2
+TEXT = "#ebe7dc"        # paper white
+MUTED = "#a9aca3"
+DIM = "#868a80"
+AMBER = "#7fb6d6"       # cyanotype blue: the one action colour (name kept for callers)
+PAPER = "#e8e2d2"       # accession-tag stock
+INK = "#191a18"         # print on the paper
+INK_SOFT = "#58594f"    # secondary print on the paper
+OK = "#8fc49b"          # calibration green
+WARN = "#f06f52"        # vermilion: risk, and only risk
+LOG_BG = "#101110"
 
-MONO_FAMILIES = ("Cascadia Mono", "Consolas", "Courier New")
+# Vendor identity is a colour-checker patch, never a logo.
+VENDOR = {"nvidia": ("#86b53e", "N"), "amd": ("#d9704a", "A"), "intel": ("#5b8fd4", "I")}
+
+UI_FAMILIES = ("Bahnschrift", "Segoe UI Variable Text", "Segoe UI")
+COND_FAMILIES = ("Bahnschrift SemiCondensed", "Bahnschrift", "Segoe UI Semibold", "Segoe UI")
+DATA_FAMILIES = ("Consolas", "Cascadia Mono", "Courier New")
+MONO_FAMILIES = DATA_FAMILIES      # older callers
 ICON_FAMILIES = ("Segoe Fluent Icons", "Segoe MDL2 Assets", "Segoe UI Symbol")
 
 # Segoe MDL2 Assets / Fluent Icons code points (the same in both)
 GLYPH = {
-    "search": "\ue721", "scan": "\ue72c", "gear": "\ue713", "play": "\ue768",
-    "check": "\ue73e", "cross": "\ue711", "game": "\ue7fc", "video": "\ue714",
-    "remix": "\ue706", "help": "\ue897", "eye": "\ue7b3", "down": "\ue70d",
-    "up": "\ue70e", "back": "\ue72b", "folder": "\ue8b7", "trash": "\ue74d",
-    "compare": "\ue8a9", "people": "\ue716", "pilot": "\ue709",
-    "close": "\ue8bb", "add": "\ue710", "warn": "\ue7ba", "info": "\ue946",
-    "bug": "\uebe8", "copy": "\ue8c8", "download": "\ue896", "link": "\ue71b",
-    "hide": "\ued1a", "more": "\ue712", "refresh": "\ue72c", "save": "\ue74e",
-    "camera": "\ue722", "headset": "\ue95b", "screen": "\ue7f4", "file": "\ue8a5", "update": "\ue777", "chip": "\ue950",
+    "search": "", "scan": "", "gear": "", "play": "",
+    "check": "", "cross": "", "game": "", "video": "",
+    "remix": "", "help": "", "eye": "", "down": "",
+    "up": "", "back": "", "folder": "", "trash": "",
+    "compare": "", "people": "", "pilot": "",
+    "close": "", "add": "", "warn": "", "info": "",
+    "bug": "", "copy": "", "download": "", "link": "",
+    "hide": "", "more": "", "refresh": "", "save": "",
+    "camera": "", "headset": "", "screen": "", "file": "", "update": "", "chip": "",
 }
 
 SCALE = 1.0             # pixels per 96-DPI pixel, set once at start
@@ -61,8 +72,30 @@ def _first_available(names: tuple[str, ...]) -> str:
 
 
 def mono(size: int = 10, bold: bool = False) -> tuple:
-    """Type. Sizes are points, which Tk scales with the display on its own."""
-    return (_first_available(MONO_FAMILIES), size, "bold" if bold else "normal")
+    """The interface face (DIN-style). Sizes are points, which Tk scales with
+    the display on its own. Named `mono` for the callers that predate the
+    redesign; only `data` is monospaced now."""
+    return (_first_available(UI_FAMILIES), size, "bold" if bold else "normal")
+
+
+ui = mono
+
+
+def label(size: int = 9) -> tuple:
+    """Semi-condensed face for tag lines and small caps-style labels."""
+    return (_first_available(COND_FAMILIES), size, "normal")
+
+
+def display(size: int = 30) -> tuple:
+    """Large headings: the light cut, so a page title reads as lettering."""
+    fam = _first_available(UI_FAMILIES)
+    return ((fam + " Light") if fam == "Bahnschrift" and "Bahnschrift Light" in set(tkfont.families()) else fam,
+            size, "normal")
+
+
+def data(size: int = 10, bold: bool = False) -> tuple:
+    """Hashes, paths and anything that must line up character by character."""
+    return (_first_available(DATA_FAMILIES), size, "bold" if bold else "normal")
 
 
 def icons(size: int = 12) -> tuple:
@@ -85,9 +118,15 @@ def fit(text: str, font: tuple, room: int) -> str:
     """The text, cut with an ellipsis where it would not fit in `room` px."""
     if width(text, font) <= room:
         return text
-    while text and width(text + "\u2026", font) > room:
+    while text and width(text + "…", font) > room:
         text = text[:-1]
-    return text.rstrip() + "\u2026"
+    return text.rstrip() + "…"
+
+
+def tag_points(x1, y1, x2, y2, cut=None):
+    """Polygon for a paper tag: a rectangle with its top-right corner clipped."""
+    cut = px(8) if cut is None else cut
+    return (x1, y1, x2 - cut, y1, x2, y1 + cut, x2, y2, x1, y2)
 
 
 API_NAMES = {"DX8": "DirectX 8", "DX9": "DirectX 9", "DX10": "DirectX 10", "DX11": "DirectX 11",

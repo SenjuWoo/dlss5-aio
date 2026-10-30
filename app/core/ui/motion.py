@@ -26,7 +26,7 @@ def mix(a: str, b: str, k: float) -> str:
 def ink_on(bg: str) -> str:
     """Dark or light text, whichever reads on this background."""
     r, g, b = int(bg[1:3], 16), int(bg[3:5], 16), int(bg[5:7], 16)
-    return "#111111" if (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 > 0.5 else "#ffffff"
+    return "#191a18" if (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 > 0.5 else "#ffffff"
 
 
 class Motion:
