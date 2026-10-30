@@ -17,7 +17,7 @@ def fake(name, folder=None):
 
 class NonGames(unittest.TestCase):
     def test_tools_and_runtimes_are_dropped(self):
-        for name in ("SlimeVR", "OVR Toolkit", "SteamVR", "tModLoader", "Wallpaper Engine",
+        for name in ("SlimeVR", "OVR Toolkit", "SteamVR", "Wallpaper Engine",
                      "Steamworks Common Redistributables", "Proton 9.0", "Proton Experimental",
                      "Source SDK Base 2013", "Valheim Dedicated Server", "Skyrim Creation Kit",
                      "Steam Linux Runtime 3.0 (sniper)"):
@@ -26,7 +26,7 @@ class NonGames(unittest.TestCase):
 
     def test_games_with_similar_names_stay(self):
         for name in ("Terraria", "VRChat", "HELLDIVERS 2", "Proton Pulse", "Sdkfoo Wars",
-                     "Slime Rancher", "Blender Quest", "Steam Hunters"):
+                     "Slime Rancher", "Blender Quest", "Steam Hunters", "tModLoader"):
             with self.subTest(name=name):
                 self.assertFalse(games.is_non_game(fake(name)))
 

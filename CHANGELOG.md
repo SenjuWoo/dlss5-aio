@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.2.1 - 2026-10-30
+- tModLoader (Terraria's mod loader, a Steam app people launch to play) is a game again: 2.2.0 wrongly listed it with the tools it hides.
+
 ## 2.2.0 - 2026-10-30
 - Runtimes: NVIDIA SR/RR/FG now pin the publisher's own signed 310.9.16 SDK (the community mirror stays as an alternative), AMD FSR loader, upscaler and frame generation move to FidelityFX SDK 2.4.0 (2.3.0.4555 / 4.1.2.4555 / 4.0.2.4555), Intel XeSS 3.0.2 confirmed current.
 - Live refresh: the first lookup of each run and every Check again read NVIDIA's, AMD's and Intel's repositories and take any newer file that matches GitHub's blob id and carries the publisher's valid signature; failures keep the verified pins. Installation routes use the same newest build.

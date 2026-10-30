@@ -1025,7 +1025,7 @@ def list_games(progress=None, emulators: bool = True) -> list[Game]:
 # "OVRToolkit" and "ovr_toolkit" are one entry.
 NON_GAME_NAMES = frozenset((
     "steamvr", "steamvrperformancetest", "steamworkscommonredistributables", "steamworksshared",
-    "spacewar", "wallpaperengine", "tmodloader", "ovrtoolkit", "ovradvancedsettings",
+    "spacewar", "wallpaperengine", "ovrtoolkit", "ovradvancedsettings",
     "slimevr", "slimevrserver", "xsoverlay", "virtualdesktopstreamer", "losslessscaling",
     "blender", "obsstudio", "aseprite", "vroidstudio", "vseeface", "vtubestudio", "vnyan",
     "warudo", "facerig", "livesplit", "rivatunerstatisticsserver", "eaapp", "ubisoftconnect",
