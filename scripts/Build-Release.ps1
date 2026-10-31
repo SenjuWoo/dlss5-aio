@@ -74,7 +74,7 @@ Detailed logging: help > debug logging, or --debug.
 Source, illustrated documentation and validation: https://github.com/SenjuWoo/dlss5-aio
 Licenses: LICENSE, LICENSE.md and licenses/.
 This ZIP contains no NVIDIA/AMD/Intel DLLs or third-party installers.
-The faster NR model announced October 13 is scheduled for October 16.
+The neural-rendering runtime 310.9.16 carries models A and B; pick one under NR model.
 "@
 [IO.File]::WriteAllText((Join-Path $payload 'README.txt'), $packReadme, (New-Object Text.UTF8Encoding($false)))
 [IO.File]::WriteAllText((Join-Path $payload 'README.md'), $packReadme, (New-Object Text.UTF8Encoding($false)))

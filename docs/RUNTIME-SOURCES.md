@@ -4,7 +4,7 @@ Runtime snapshot rechecked October 30, 2026 against the publishers' own reposito
 
 ## What is available
 
-[NVIDIA's October 13 announcement](https://www.nvidia.com/en-us/geforce/news/dlss-5-faster-ai-model-hogwarts-legacy-rtx-spark-laptops/) schedules the faster DLSS 5 neural-rendering model for October 16. It does not establish a released October 14 NR DLL. The October 13 Frame Generation Preset C beta is a separate performance change; SR/RR/FG build 310.9.16 must not be described as the upcoming faster NR model.
+[NVIDIA's October 13 announcement](https://www.nvidia.com/en-us/geforce/news/dlss-5-faster-ai-model-hogwarts-legacy-rtx-spark-laptops/) scheduled the faster DLSS 5 neural-rendering model for October 16. It shipped that day inside `nvngx_dlssnr.dll` 310.9.16.0 (extracted from the NBA 2K27 update, carried by the RHI mirror as `dlssnr-310.9.16`): that runtime offers model A, the September model, and model B, the smaller FP8 model selected by default. The October 13 Frame Generation Preset C beta remains a separate performance change; SR/RR/FG build 310.9.16 is a different file and must not be confused with either.
 
 | Existing runtime filename | Verified FileVersion | Source |
 | --- | --- | --- |
@@ -56,6 +56,6 @@ The expected archive/file size is capped at 256 MiB. Runtime downloads pass that
 
 Installation and runtime restoration use durable recovery records and staged, byte-verified copies. Later personal edits are preserved separately. Historical install, emulator or ASI-loader backups without ownership hashes are retained for review rather than silently treated as verified originals. Other applications do not share AIO's game/profile/cache locks; close them before modifying the same files.
 
-NR selection belongs to the neural-rendering installer. The inspected community feed lists SF-v2 (310.8.2, RTX 20/30/40/50) separately from Lecram (310.8.3, RTX 50 only). Picking the first NR entry globally would be wrong for an RTX 4080. Neither entry proves availability of the October 16 model. Proxy/cost-scaler installations also require preserving their renamed real NR DLL and ownership records; generic runtime refresh does not overwrite that layout.
+NR selection belongs to the neural-rendering installer. The community feed lists SF-v2 (310.8.2, RTX 20/30/40/50) separately from Lecram (310.8.3, RTX 50 only); picking the first NR entry globally would be wrong for an RTX 4080. Since October 16 the same feed carries `dlssnr-310.9.16` - the model A/B runtime, whose fatbin lists sm 75/86/89/120 - and the build dropdown offers it. The installer still checks the fatbin before committing, so a build without kernels for the card is skipped rather than installed. Proxy/cost-scaler installations also require preserving their renamed real NR DLL and ownership records; generic runtime refresh does not overwrite that layout.
 
 Publisher license conditions still apply. AIO downloads runtime binaries when needed rather than bundling proprietary runtime payloads in its application ZIP. NVIDIA's SDK, current AMD binary terms and Intel's binary license are distinct; community hosting is not a redistribution grant.

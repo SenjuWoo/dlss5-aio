@@ -15,7 +15,8 @@ managers, updaters and emulators while AIO changes the same files.
 
 README.md explains support boundaries, logging and recovery.
 Log: %LOCALAPPDATA%\dlss5-aio\aio.log; enable debug logging in help.
-NVIDIA's October 13 announcement schedules the faster NR model for October 16.
+The faster NR model shipped October 16 as nvngx_dlssnr 310.9.16, which
+carries models A and B; pick one under NR model on a game page.
 The bundled runtime versions were verified October 14; this is dated evidence.
 Report buttons open a prefilled GitHub form: opening sends its details to
 GitHub, and submitting publishes them. Review the form before submitting.
