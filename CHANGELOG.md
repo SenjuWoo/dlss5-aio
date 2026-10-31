@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.2.2 - 2026-10-31
+- Neural rendering: the model is a choice on every route that can honour it, not only on OptiScaler. `nvngx_dlssnr` 310.9.16 carries two models - A, the September one, and B, the smaller FP8 model that is up to 40% faster at the same settings - and the tool writes the choice where each consumer reads it: `[RenoDX.DLSS5] NRPreset` in ReShade.ini for native, bridge, feeder and neural-upstream, `[DlssNr] Preset` in OptiScaler.ini for the OptiScaler routes.
+- The row was mislabelled: it offered "Preset 1", "Preset 2" and a "Preset 3" that does not exist. The fork's own menu calls the key "NR model" with Automatic / Original / Optimized, and prints "Unavailable preset" for 3. Automatic leaves the runtime's default, which is model B on 310.9.16.
+- Picking model B while a 310.8.x `nvngx_dlssnr` is installed now says so in the install notes - that runtime has no model B and falls back to its own default - instead of leaving a setting that silently does nothing.
+- Pre-install driver note: on 621.01 and newer, a renodx-dlss5 build picked by hand (8.5, 10.8) crashes the game at startup with an access violation reading `nvngx_dlssnr.dll`. The automatic 4.55 pin on 616.64+ is unaffected; the note says to leave the build on Auto.
+
 ## 2.2.1 - 2026-10-30
 - tModLoader (Terraria's mod loader, a Steam app people launch to play) is a game again: 2.2.0 wrongly listed it with the tools it hides.
 - A game whose AMD FSR upscaler or frame-generation DLL is older but which has no AMD loader beside it (Helldivers 2, for one) no longer keeps a lit Update button: AMD's split builds only work with their loader and one cannot be supplied, so that line is shown as blocked with the reason and the game reads as up to date.

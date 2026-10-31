@@ -822,7 +822,14 @@ LOG_VALUES = {"LogToFile": "true", "LogLevel": "2"}
 # the very thing this route installs (#51).
 HOTFIX_SECTION = "Hotfix"
 HOTFIX_VALUES = {"CheckForUpdate": "false"}
-NR_PRESETS = {0: "Default", 1: "Preset 1", 2: "Preset 2", 3: "Preset 3"}
+# The fork's own menu calls this key "NR model", not a numbered preset
+# (DlssNr_MenuControls.cpp): 0 Automatic, 1 Original (the September model),
+# 2 Optimized (the smaller FP8 model that first ships in nvngx_dlssnr
+# 310.9.16). There is no preset 3 - the fork prints "Unavailable preset" for
+# it - and a 310.8.x runtime has no model 2, so it falls back to its own
+# default. The install note says so when the picked build cannot honour it.
+NR_PRESETS = {0: "Automatic", 1: "Model A - Original",
+              2: "Model B - Optimized (310.9.16)"}
 NR_STYLES = {0: "Standard", 1: "Natural", 2: "Cinematic"}
 NR_SCALE_MIN, NR_SCALE_MAX = 25, 100
 # Where the dial pays off. At 100% the pass costs about half your fps; the

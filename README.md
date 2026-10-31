@@ -39,7 +39,7 @@ NVIDIA SR/FG/RR **310.9.16** is available from the RHI community mirror; **310.9
 
 AMD and Intel pins are a verified dated snapshot. Their SDK release numbers differ from the individual DLL versions. NVIDIA's explicit **check again** resolves the live mirror metadata to an exact release asset and checksum; new mirror DLLs without a bundled pin also require a valid NVIDIA publisher signature. Known exact pins can be reused offline. See [the complete source/version record](docs/RUNTIME-SOURCES.md).
 
-**The 2x faster DLSS 5 neural-rendering model is scheduled for October 16, not October 14.** NVIDIA's October 13 Frame Generation Preset C beta is separate. This release does not claim to contain an unreleased model. [NVIDIA announcement](https://www.nvidia.com/en-us/geforce/news/dlss-5-faster-ai-model-hogwarts-legacy-rtx-spark-laptops/)
+**The 2x faster DLSS 5 model shipped on October 16 as `nvngx_dlssnr` 310.9.16.** That runtime carries two models: A, the September one, and B, the smaller FP8 model that is up to 40% faster at the same settings and is the default when the runtime is asked for nothing. The build list offers it from the RHI mirror, and the **NR model** row writes the choice where the installed route reads it (`[RenoDX.DLSS5] NRPreset` in ReShade.ini, `[DlssNr] Preset` in OptiScaler.ini). Frame Generation Preset C is a separate thing. [NVIDIA announcement](https://www.nvidia.com/en-us/geforce/news/dlss-5-faster-ai-model-hogwarts-legacy-rtx-spark-laptops/)
 
 ## Saints Row: The Third and older games
 

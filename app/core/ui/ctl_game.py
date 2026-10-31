@@ -686,7 +686,10 @@ class GameControl:
             "workres": lambda: self.work_applies(),
             "preset": lambda: feeder,
             "hdr": lambda: feeder,
-            "nr_preset": lambda: opti,
+            # The NR model is one choice for every route that runs
+            # renodx-dlss5 (ReShade.ini NRPreset) and for OptiScaler
+            # ([DlssNr] Preset), so the row is shown wherever it lands.
+            "nr_preset": lambda: opti or r in (dlss.NATIVE, dlss.BRIDGE, dlss.FEEDER, dlss.UPSTREAM),
             "nr_style": lambda: opti,
             "fg": lambda: opti and api == "DX12",
             "feeder": lambda: feeder,
@@ -1034,6 +1037,8 @@ class GameControl:
                 keep_game_dlss=s["keep_dlss"],
                 feed=feed,
                 nr=nr,
+                nr_model=(s["nr_preset"] if vis("nr_preset") and not other
+                          and s["nr_preset"] in reshade_ini.ADDON_MODELS else 0),
                 feeder_prerelease=route == dlss.FEEDER and feeder == "pre",
                 feeder_tag=feeder if route == dlss.FEEDER and feeder not in ("stable", "pre") else "",
                 dxvk=bool(s["dxvk"]) and vis("dxvk") and not other,
@@ -1715,8 +1720,18 @@ class GameControl:
                 s["workres"] = wr
         if vis("preset") and number(feed.get("preset", 0), 0) in feedcfg.PRESETS:
             s["preset"] = number(feed.get("preset", 0), 0)
-        if vis("nr_preset") and number(nr.get("Preset", 0), 0) in optiscaler.NR_PRESETS:
+        if self.route == dlss.OPTI and vis("nr_preset") \
+                and number(nr.get("Preset", 0), 0) in optiscaler.NR_PRESETS:
             s["nr_preset"] = number(nr.get("Preset", 0), 0)
+        elif vis("nr_preset") and not dials_only and self.game is not None:
+            # The ReShade routes keep the model in ReShade.ini rather than in
+            # the install record: read what the add-on itself will read, so
+            # the row does not say "Automatic" over a file that says model B.
+            keys = {k.lower(): v for k, v in
+                    ((reshade_ini.addon_state(self.game.folder) or {}).get("keys") or {}).items()}
+            m = number(keys.get(reshade_ini.ADDON_MODEL_KEY.lower()), 0)
+            if m in reshade_ini.ADDON_MODELS:
+                s["nr_preset"] = m
         if dials_only:
             self._refresh_notes()
             return

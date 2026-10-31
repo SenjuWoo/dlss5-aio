@@ -133,7 +133,7 @@ def _ensure_define(raw: str, define: str) -> str:
     return join_list(kept)
 
 
-def write_reshade_ini(game_dir: Path, provider: int = 3) -> None:
+def write_reshade_ini(game_dir: Path, provider: int = 3, nr_model: int = 0) -> None:
     """Create/update ReShade.ini without touching the user's own settings."""
     p = game_dir / "ReShade.ini"
     ini = Ini.load(p)
@@ -145,6 +145,7 @@ def write_reshade_ini(game_dir: Path, provider: int = 3) -> None:
                            f"DLSS5_MV_PROVIDER={provider}"))
     # Add-ons live next to the game executable; tell ReShade explicitly.
     ini.set_default("ADDON", "AddonPath", ".\\")
+    _set_model(ini, nr_model)
     ini.save(p)
 
 
@@ -269,11 +270,12 @@ def carry_over(game_dir: Path, others: list[Path]) -> Path | None:
     return None
 
 
-def write_addon_only_ini(dir_: Path) -> None:
+def write_addon_only_ini(dir_: Path, nr_model: int = 0) -> None:
     r"""For the host64\ folder: load add-ons only, no shaders."""
     p = dir_ / "ReShade.ini"
     ini = Ini.load(p)
     ini.set_default("ADDON", "AddonPath", ".\\")
+    _set_model(ini, nr_model)
     ini.save(p)
 
 
@@ -303,6 +305,24 @@ def write_shader_paths(game_dir: Path) -> None:
 # ReShade.ini"), and the same names are in their binaries.
 ADDON_SECTION = "RenoDX.DLSS5"
 ADDON_SWITCH = "NeuralUplift"
+# The same add-on's model choice: 1 = the September model, 2 = the smaller
+# FP8 model that ships in nvngx_dlssnr 310.9.16. Verified with NGX logging in
+# The Witcher 3 by the author of DLSS-AiO-Swapper (2026-10-19). 0 or an
+# absent key means the runtime's own default, which is model B on 310.9.16
+# and the only model on 310.8.x.
+ADDON_MODEL_KEY = "NRPreset"
+ADDON_MODELS = (1, 2)
+
+
+def _set_model(ini: "Ini", model: int) -> None:
+    """Write the chosen NR model, or leave the file alone for Automatic.
+
+    Only 1 and 2 are written: they are the two values the add-on knows. A
+    stale 3 from an older version of this tool is left as it is rather than
+    turned into a value the add-on would ignore anyway.
+    """
+    if model in ADDON_MODELS:
+        ini.set(ADDON_SECTION, ADDON_MODEL_KEY, str(model))
 
 
 def addon_state(game_dir: Path) -> dict:

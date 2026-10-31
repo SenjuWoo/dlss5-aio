@@ -927,6 +927,13 @@ _RENODX_ROUTES = (NATIVE, BRIDGE, FEEDER, RENODX)
 # optiscaler.DRIVER_MIN says the same thing for its own route; kept here as
 # its own name so this module does not import that one for a constant.
 _DRIVER_KNOWN_GOOD = "616.56"
+# 621.01 changed how the driver maps NGX modules into the process, and
+# renodx-dlss5 8.5/10.8 now read past the end of nvngx_dlssnr.dll at startup:
+# an access violation in the game, not a silent no-op (machiavelli31's
+# DLSS-AiO-Swapper README, reproduced in The Witcher 3). The 4.55 pin still
+# applies on this driver, so the default install does not hit it - a build
+# picked by hand does.
+_DRIVER_CRASH_MIN = "621.01"
 
 
 def standalone_fits(api: str, bitness: int | None) -> bool:
@@ -1007,7 +1014,13 @@ def driver_warning(route: str, driver: str | None,
                 f"{sources.DRIVER_FAULT_MIN} and newer, on every evaluate - "
                 f"the tool pins {sources.DRIVER_FAULT_RENODX_PIN} here "
                 f"instead. That is a way round it, not a fix: some games "
-                f"fault on {sources.DRIVER_FAULT_RENODX_PIN} too. " + other)
+                f"fault on {sources.DRIVER_FAULT_RENODX_PIN} too. "
+                + (f"On {_DRIVER_CRASH_MIN} and newer a newer build (8.5, "
+                   f"10.8) crashes the game at startup instead - an access "
+                   f"violation reading nvngx_dlssnr.dll - so leave the build "
+                   f"on Auto on this driver. "
+                   if gpu.driver_at_least(_DRIVER_CRASH_MIN, driver) else "")
+                + other)
     if route == STANDALONE:
         # This route was being warned off with the renodx fault's record,
         # which is not its own: it does not load that add-on, and the one

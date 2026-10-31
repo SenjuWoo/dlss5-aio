@@ -267,6 +267,11 @@ class Options:
     feeder_tag: str = ""                    # "" = stable or newest pre-release
     dxvk: bool = False                      # run a D3D11 game on Vulkan via DXVK
     nr: dict = field(default_factory=dict)  # OptiScaler [DlssNr] settings
+    # ReShade routes: which neural-rendering model to ask for. renodx-dlss5
+    # reads it from [RenoDX.DLSS5] NRPreset in ReShade.ini - 1 is the
+    # September model, 2 the smaller FP8 one that ships in 310.9.16. 0 leaves
+    # the runtime's own default alone, which is model B on 310.9.16.
+    nr_model: int = 0
     # OptiScaler route, D3D12: FSR 3.1 frame generation from the libraries
     # OptiScaler ships, on any card. Off by default - it adds latency and
     # every game's HUD reacts differently.
@@ -1502,6 +1507,21 @@ def _restore_remix(conf: Path, record: dict) -> bool:
             raise OSError(f"{conf.name} changed while its original option was being restored")
         _atomic_copy(staged, conf)
     return True
+
+
+def _nr_model_note(rep: Report, label: str, model: int) -> None:
+    """Say so when the build installed cannot honour the model picked.
+
+    Model B only exists in nvngx_dlssnr 310.9.16 and newer; a 310.8.x
+    runtime ignores the request and uses its own model, so a setting that
+    silently does nothing is worth one sentence at the point the build was
+    chosen - with the fix (the build dropdown above it).
+    """
+    if model == 2 and not str(label).startswith("310.9"):
+        rep.notes.append(
+            f"model B needs nvngx_dlssnr 310.9.16 or newer, and {label} was "
+            f"installed - the runtime will use its own default model. Pick "
+            f"310.9.16 above for model B.")
 
 
 def _configure(root: Path, rep: Report, function, *args, names=("ReShade.ini", "ReShadePreset.ini"), record_root=None, **kwargs):
@@ -3582,6 +3602,7 @@ def install(g: games.Game, opt: Options, on_step=None, on_prog=None, on_log=None
             log(f"      GPU check: {why_gpu}")
             rep.notes.append(f"dlssnr version: {e['label']}")
             rep.components["dlssnr"] = e["label"]
+            _nr_model_note(rep, e["label"], opt.nr_model)
             tier = gpu.tier_note(sm, e["label"])
             if tier:
                 log(f"      {tier}")
@@ -4145,6 +4166,7 @@ def install(g: games.Game, opt: Options, on_step=None, on_prog=None, on_log=None
         log(f"      nvngx_dlssnr {e['label']}")
         rep.notes.append(f"dlssnr version: {e['label']}")
         rep.components["dlssnr"] = e["label"]
+        _nr_model_note(rep, e["label"], opt.nr_model)
         if tried:
             rep.notes.append(f"skipped as incompatible: {', '.join(tried)}")
         tier = gpu.tier_note(sm, e["label"])
@@ -4278,7 +4300,7 @@ def install(g: games.Game, opt: Options, on_step=None, on_prog=None, on_log=None
         # --- 8) host64 --------------------------------------------------------
         if not x64 and opt.path == FEEDER:
             begin("host64 helper process")
-            _configure(host, rep, reshade_ini.write_addon_only_ini, record_root=root)
+            _configure(host, rep, reshade_ini.write_addon_only_ini, opt.nr_model, record_root=root)
             rep.written.append(f"{HOST_DIR}/ReShade.ini")
             log(f"      {HOST_DIR}/ ready (ReShade + DLSS parts inside)")
 
@@ -4335,7 +4357,7 @@ def install(g: games.Game, opt: Options, on_step=None, on_prog=None, on_log=None
         if opt.path == FEEDER:
             _backup(root / "ReShade.ini", rep, root)
             _backup(root / "ReShadePreset.ini", rep, root)
-            _configure(root, rep, reshade_ini.write_reshade_ini, opt.provider)
+            _configure(root, rep, reshade_ini.write_reshade_ini, opt.provider, opt.nr_model)
             _configure(root, rep, _ask_for_the_pass, opt, log)
             _configure(root, rep, reshade_ini.write_preset, opt.provider)
             src = _configure(root, rep, reshade_ini.carry_over, [Path(x) for x in prefs.installs()])
@@ -4358,7 +4380,7 @@ def install(g: games.Game, opt: Options, on_step=None, on_prog=None, on_log=None
             # effect to compile and no technique order to get right. ReShade
             # only has to load the add-ons sitting next to the executable.
             _backup(root / "ReShade.ini", rep, root)
-            _configure(root, rep, reshade_ini.write_addon_only_ini)
+            _configure(root, rep, reshade_ini.write_addon_only_ini, opt.nr_model)
             _configure(root, rep, _ask_for_the_pass, opt, log)
             if opt.path == ROUTE_RENODX:
                 _configure(root, rep, reshade_ini.enable_renodx_dlss_nr)
