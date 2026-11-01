@@ -1,44 +1,33 @@
-# Contributor Covenant Code of Conduct
+# Code of conduct
 
-## Our Pledge
+This is a build project, not a content moderation committee. The tools here do not filter what you build, and this project does not police taste.
 
-We as members, contributors, and leaders pledge to make participation in our community a harassment-free experience for everyone, regardless of age, body size, visible or invisible disability, ethnicity, sex characteristics, gender identity and expression, level of experience, education, socio-economic status, nationality, personal appearance, race, caste, color, religion, or sexual identity and orientation.
+## Build whatever
 
-We pledge to act and interact in ways that contribute to an open, welcoming, diverse, inclusive, and healthy community.
+Gore, horror, porn mods, adult content, dark humor, slurs in fiction, weird fetish mechanics, cursed tech, whatever you want. If it is legal where you ship it, it is in scope. A toolkit is a tool, not a babysitter.
 
-## Our Standards
+## The only hard lines
 
-Examples of behavior that contributes to a positive environment:
+These are not negotiable and they are not subject to "it's just a joke" or "it's fictional":
 
-* Demonstrating empathy and kindness toward other people
-* Being respectful of differing opinions, viewpoints, and experiences
-* Giving and gracefully accepting constructive feedback
-* Accepting responsibility and apologizing to those affected by our mistakes
-* Focusing on what is best not just for us as individuals, but for the overall community
+- **Backdoors.** No hidden remote access, undisclosed command channels, or code that lets someone else control a user's game or machine.
+- **Sexual content involving minors.** No characters, no "aged up" workaround, no ambiguous edge case. If it sexualizes a child, it does not ship.
+- **Malware.** No viruses, worms, ransomware, stealers, droppers, or self-propagating payloads.
+- **Hidden destructive behavior.** No deleting files, wiping saves, corrupting worlds, exfiltrating data, or doing anything destructive the user did not ask for. Destructive features must be explicit, documented, and opt-in.
+- **Disguised payloads.** None of the above hidden inside a mod, dependency, installer, or "performance patch."
 
-Examples of unacceptable behavior:
+If you have to hide it, it does not belong here.
 
-* The use of sexualized language or imagery, and sexual attention or advances of any kind
-* Trolling, insulting or derogatory comments, and personal or political attacks
-* Public or private harassment
-* Publishing others' private information without explicit permission
-* Other conduct which could reasonably be considered inappropriate in a professional setting
+## Reporting
 
-## Enforcement Responsibilities
+Backdoors, malware, hidden destructive behavior, or sexual content involving minors: use the private advisory form at <https://github.com/SenjuWoo/dlss5-aio/security/advisories/new>.
 
-Project maintainers are responsible for clarifying and enforcing our standards and will take appropriate and fair corrective action in response to any behavior they deem inappropriate, threatening, offensive, or harmful.
+Everything else: open an issue.
 
 ## Scope
 
-This Code of Conduct applies within all community spaces, and also applies when an individual is officially representing the community in public spaces.
+This policy covers contributions to this repository and anything published under this project's name. It is not a promise that the project scans third-party mods, plugins or dependencies for you.
 
-## Enforcement
+## Conduct between people
 
-Instances of abusive, harassing, or otherwise unacceptable behavior may be reported to the project maintainers. All complaints will be reviewed and investigated promptly and fairly.
-
-## Attribution
-
-This Code of Conduct is adapted from the [Contributor Covenant][homepage], version 2.1, available at [https://www.contributor-covenant.org/version/2/1/code_of_conduct.html][v2.1].
-
-[homepage]: https://www.contributor-covenant.org
-[v2.1]: https://www.contributor-covenant.org/version/2/1/code_of_conduct.html
+Keep technical disagreement direct and evidence-based. Harassment, threats, discriminatory abuse, doxxing, deliberate sabotage and repeated bad-faith disruption are not accepted, and are handled the same way as the hard lines above.
