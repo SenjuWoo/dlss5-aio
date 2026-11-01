@@ -1,4 +1,17 @@
+<p align="center">
+  <img src="docs/images/logo.svg" width="72" height="72" alt="DLSS 5 AIO">
+</p>
+
+<div align="center">
+
 # DLSS 5 AIO
+
+<p>
+  <a href="https://github.com/SenjuWoo/dlss5-aio/releases/latest"><img src="https://img.shields.io/github/v/release/SenjuWoo/dlss5-aio?label=release&color=7FB6D6&labelColor=0d1117" alt="latest release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-7FB6D6?labelColor=0d1117" alt="MIT License"></a>
+</p>
+
+</div>
 
 One portable Windows app for game runtime updates and DLSS neural-rendering installation.
 
@@ -16,7 +29,7 @@ The screenshot shows the running application with disposable fixture games. It d
 4. To install neural rendering, open a game. The app reads its executable, graphics API and existing integration, recommends a route and offers **what will happen?** before installation. Components download from their upstream sources when needed.
 5. Play the game, then use **did it work?** to inspect loading/evaluation evidence. **uninstall** removes verified installation files and restores recorded originals. Unproven historical files and backups are retained for review.
 
-Keep the extracted folder together: **DLSS5-AIO.exe** needs the `_internal` folder beside it. The ZIP's SHA256 is in `SHA256SUMS.txt` on the release page. The app is unsigned, so SmartScreen may warn on first run. Defender's machine-learning signatures have flagged earlier builds (the 2.0.1 single-file pack, and the stock PyInstaller launcher stub up to 2.2.2); since 2.2.3 the launcher is compiled from PyInstaller's own source during the build, and the shipped EXE scans clean on the same signatures. If your antivirus still objects, the cause is the unsigned, freshly built executable, not the code - report it with the SHA256.
+Keep the extracted folder together: **DLSS5-AIO.exe** needs the `_internal` folder beside it. The ZIP's SHA256 is in `SHA256SUMS.txt` on the release page. The app is unsigned, so SmartScreen may warn on first run; Defender flagged the older single-file 2.0.1 build as a false positive, and 2.0.2 ships as a one-folder build to avoid that.
 
 Screen capture, video enhancement and image processing are excluded. Settings and caches are separate from installed Autopilot, Swapper and Manager applications.
 
