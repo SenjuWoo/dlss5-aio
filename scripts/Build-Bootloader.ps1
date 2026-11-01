@@ -118,28 +118,36 @@ if (-not (Test-Path -LiteralPath (Join-Path $bootloader 'waf'))) {
 # waf needs the compiler on PATH, so it runs inside the vcvars environment.
 $log = Join-Path $CacheDir 'waf.log'
 $cmd = 'call "{0}" >nul && "{1}" waf all' -f $vcvars, $Python
+$built = Join-Path $tree 'PyInstaller\bootloader\Windows-64bit-intel'
+# Delete what this run must produce. Their presence afterwards is the proof
+# waf finished: Start-Process's ExitCode reads empty under Windows PowerShell
+# 5.1 even when the process has exited, so it cannot be trusted here.
+foreach ($name in @('run.exe', 'runw.exe')) {
+    Remove-Item -LiteralPath (Join-Path $built $name) -Force -ErrorAction SilentlyContinue
+}
 $process = $null
 Push-Location $bootloader
 try {
-    $process = Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', $cmd -Wait -PassThru -NoNewWindow `
+    # Not -Wait: PowerShell's -Wait can follow a grandchild that outlives the
+    # build (MSVC's mspdbsrv.exe does), which hung a CI job. WaitForExit on
+    # the process itself, bounded, is what is actually meant here.
+    $process = Start-Process -FilePath 'cmd.exe' -ArgumentList '/d', '/c', $cmd -PassThru -NoNewWindow `
         -RedirectStandardOutput $log -RedirectStandardError (Join-Path $CacheDir 'waf.err.log')
+    if (-not $process.WaitForExit(600000)) {
+        try { $process.Kill() } catch { }
+        Write-Warning 'The bootloader build did not finish in 10 minutes; keeping the stock bootloader.'
+        return
+    }
 } catch {
     Write-Warning "Could not start the bootloader build ($_); keeping the stock bootloader."
 } finally { Pop-Location }
 if (-not $process) { return }
-if ($process.ExitCode -ne 0) {
-    Write-Warning "The bootloader build failed (see $log); keeping the stock bootloader."
+$missing = @(@('run.exe', 'runw.exe') | Where-Object { -not (Test-Path -LiteralPath (Join-Path $built $_)) })
+if ($missing.Count) {
+    Write-Warning "The bootloader build produced no $($missing -join ', ') (see $log); keeping the stock bootloader."
     return
 }
 
-$built = Join-Path $tree 'PyInstaller\bootloader\Windows-64bit-intel'
-foreach ($name in @('run.exe', 'runw.exe')) {
-    $source = Join-Path $built $name
-    if (-not (Test-Path -LiteralPath $source)) {
-        Write-Warning "The bootloader build produced no $name; keeping the stock one."
-        return
-    }
-}
 # Only now touch the installed package: both files exist and came from waf.
 foreach ($name in @('run.exe', 'runw.exe')) {
     Copy-Item -LiteralPath (Join-Path $built $name) -Destination (Join-Path $target $name) -Force
