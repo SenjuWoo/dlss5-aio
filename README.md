@@ -7,8 +7,9 @@
 # DLSS 5 AIO
 
 <p>
-  <a href="https://github.com/SenjuWoo/dlss5-aio/releases/latest"><img src="https://img.shields.io/github/v/release/SenjuWoo/dlss5-aio?label=release&color=7FB6D6&labelColor=0d1117" alt="latest release"></a>
+  <a href="https://github.com/SenjuWoo/dlss5-aio/actions/workflows/ci.yml"><img src="https://github.com/SenjuWoo/dlss5-aio/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-7FB6D6?labelColor=0d1117" alt="MIT License"></a>
+  <a href="https://github.com/SenjuWoo/dlss5-aio/releases/latest"><img src="https://img.shields.io/github/v/release/SenjuWoo/dlss5-aio?label=release&color=7FB6D6&labelColor=0d1117" alt="latest release"></a>
 </p>
 
 </div>
