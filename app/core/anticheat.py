@@ -119,10 +119,14 @@ def detect(install_dir: Path, folder: Path) -> Finding:
         try:
             for entry in d.iterdir():
                 look(entry)
-                # Anti-cheat usually lives one level down in its own folder
+                # Anti-cheat usually lives one level down in its own folder.
+                # No cap on how many names are looked at: the listing is
+                # materialized either way, and a game with more than 80 files
+                # beside its executable hid XIGNCODE3 at the end of the
+                # alphabet - Black Desert's bin64\XignCode, reported missing.
                 if entry.is_dir() and not entry.name.startswith("."):
                     try:
-                        for sub in list(entry.iterdir())[:80]:
+                        for sub in entry.iterdir():
                             look(sub)
                     except OSError:
                         continue

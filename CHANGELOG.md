@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.2.3 - 2026-11-01
+- Antivirus false positive fixed at the source: Microsoft Defender's ML signatures flagged the shipped `DLSS5-AIO.exe` (`Trojan:Win32/Bearfoos.B!ml`, reproduced locally on the 2.2.2 release bytes). The trigger is the launcher stub that ships inside the PyInstaller wheel, not the app. The build now compiles that launcher from the pinned PyInstaller sdist with MSVC (`scripts/Build-Bootloader.ps1`) and the same app scans clean on the same signature set. A machine without MSVC keeps the stock stub and the build log says so.
+- Anti-cheat: XIGNCODE3 was missed in games that keep it deep in a busy folder - Black Desert Online's `bin64\XignCode`, behind more than eighty files in the same folder. The scan stopped counting at 80 names per folder; it now reads them all. The whole-word rule that keeps `vanguard_outfit.pak` from counting as Riot Vanguard is unchanged.
+- No gameplay, runtime or recovery behaviour changed in this release.
+
 ## 2.2.2 - 2026-10-31
 - Neural rendering: the model is a choice on every route that can honour it, not only on OptiScaler. `nvngx_dlssnr` 310.9.16 carries two models - A, the September one, and B, the smaller FP8 model that is up to 40% faster at the same settings - and the tool writes the choice where each consumer reads it: `[RenoDX.DLSS5] NRPreset` in ReShade.ini for native, bridge, feeder and neural-upstream, `[DlssNr] Preset` in OptiScaler.ini for the OptiScaler routes.
 - The row was mislabelled: it offered "Preset 1", "Preset 2" and a "Preset 3" that does not exist. The fork's own menu calls the key "NR model" with Automatic / Original / Optimized, and prints "Unavailable preset" for 3. Automatic leaves the runtime's default, which is model B on 310.9.16.

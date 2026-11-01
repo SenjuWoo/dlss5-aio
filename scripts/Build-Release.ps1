@@ -19,6 +19,12 @@ $version = (& $Python (Join-Path $repo 'app\dlss5_aio.py') --version | Out-Strin
 if ($LASTEXITCODE -ne 0 -or $version -notmatch '^\d+\.\d+\.\d+$') { throw 'Cannot read the application version.' }
 $buildRoot = Join-Path $repo ('.build\' + [guid]::NewGuid().ToString('N'))
 $payload = Join-Path $buildRoot ('DLSS5-AIO-v' + $version)
+
+# Defender's ML signatures flag the bootloader that ships inside the
+# PyInstaller wheel (Trojan:Win32/Bearfoos.B!ml). The same source compiled
+# here scans clean; on a machine without MSVC the stock one stays and the
+# warning says so. Runs before PyInstaller, which copies whatever is there.
+& (Join-Path $PSScriptRoot 'Build-Bootloader.ps1') -Python $Python
 [IO.Directory]::CreateDirectory($payload) | Out-Null
 
 # Freeze from the committed spec; large publisher DLLs remain runtime downloads.
