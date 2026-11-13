@@ -16,6 +16,7 @@ import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
+from urllib.parse import urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from core import runtimecatalog as catalog
@@ -346,7 +347,7 @@ class PublisherRefreshTests(RuntimeCatalogTests):
         catalog._CATALOG = None
         self.refresh(patient=True)
         again = self.asked[asked:]
-        self.assertFalse([u for u in again if "api.github.com" in u], again)
+        self.assertFalse([u for u in again if urlsplit(u).hostname == "api.github.com"], again)
 
     def test_check_again_always_asks_for_the_head_commit(self):
         self.refresh(patient=True)
