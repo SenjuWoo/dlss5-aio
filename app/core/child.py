@@ -1,7 +1,8 @@
 r"""Starting somebody else's program from this one.
 
-The release is a PyInstaller onefile: its bootloader unpacks into
-%TEMP%\_MEIxxxxx and calls SetDllDirectoryW on that folder, so this process
+The release is a PyInstaller build: its bootloader calls SetDllDirectoryW on
+the folder holding the runtime (`_internal` beside the .exe since 2.0.2,
+%TEMP%\_MEIxxxxx in the single-file builds before it), so this process
 finds its own DLLs. Windows hands that setting to every child process, and
 the folder then sits in the child's search order AHEAD of System32: a game
 started with 'play' found OUR vcruntime140.dll first. RPCS3 checks where its

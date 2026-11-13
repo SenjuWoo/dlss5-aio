@@ -172,8 +172,8 @@ class App(LibraryControl, GameControl, WatchControl, DlssControl):
         except Exception:
             card = "graphics card not read"
         return [
-            ("how it works", lambda: webbrowser.open(f"{REPO_URL}#which-route-a-game-gets")),
-            ("compatibility list", lambda: webbrowser.open(community.PAGE_URL)),
+            ("how it works", lambda: webbrowser.open(f"{REPO_URL}#two-workflows-one-application")),
+            ("issues and reports", lambda: webbrowser.open(community.PAGE_URL)),
             ("report a bug", lambda: self.report_bug("bug")),
             ("suggest a feature", self.suggest),
             ("open the log file", self.shell.open_log_file),

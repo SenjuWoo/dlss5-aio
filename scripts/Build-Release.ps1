@@ -59,6 +59,13 @@ foreach ($pair in @(@('LICENSE.txt', 'Python-LICENSE.txt'), @('tcl\tcl8.6\licens
     Copy-Item -LiteralPath $notice -Destination (Join-Path $notices $pair[1])
 }
 
+# The CA bundle is the one third-party package inside the build; its notice ships with it.
+$bundleLicense = (& $Python -c "import importlib.metadata as m; d = m.distribution('certifi'); print(next(str(d.locate_file(f)) for f in d.files if f.name == 'LICENSE'))" | Out-String).Trim()
+if ($LASTEXITCODE -ne 0 -or -not $bundleLicense -or -not (Test-Path -LiteralPath $bundleLicense)) {
+    throw 'certifi (requirements-build.txt) or its license is missing; the build would ship without a CA bundle.'
+}
+Copy-Item -LiteralPath $bundleLicense -Destination (Join-Path $notices 'certifi-MPL-2.0.txt')
+
 # The shipped docs' relative source links need the referenced text alongside them.
 [IO.Directory]::CreateDirectory((Join-Path $payload 'docs')) | Out-Null
 foreach ($name in @('AUDIT.md', 'RUNTIME-SOURCES.md')) { Copy-Item -LiteralPath (Join-Path $repo ('docs\' + $name)) -Destination (Join-Path $payload 'docs') }

@@ -34,7 +34,8 @@ def main():
             assert exe.stat().st_size > 1_000_000
             assert (folder / "_internal").is_dir(), "one-folder runtime missing"
             for name in ("README.txt", "CHANGELOG.md", "LICENSE", "licenses/Python-LICENSE.txt",
-                         "licenses/Tcl-LICENSE.txt", "licenses/Tk-LICENSE.txt", "licenses/Autopilot-MIT.txt"):
+                         "licenses/Tcl-LICENSE.txt", "licenses/Tk-LICENSE.txt", "licenses/Autopilot-MIT.txt",
+                         "licenses/certifi-MPL-2.0.txt", "_internal/certifi/cacert.pem"):
                 assert (folder / name).is_file(), name
             env = dict(os.environ, LOCALAPPDATA=str(Path(directory) / "isolated-profile"))
             for flag, code, expected in (("--version", 0, args.version), ("--self-test", 0, '"status": "ok"'),
@@ -44,7 +45,8 @@ def main():
                 assert result.returncode == code, (flag, result.returncode, result.stdout, result.stderr)
                 assert expected in result.stdout + result.stderr, (flag, result.stdout, result.stderr)
                 if flag == "--self-test":
-                    assert json.loads(result.stdout)["status"] == "ok"
+                    report = json.loads(result.stdout)
+                    assert report["status"] == "ok" and report["ca_bundle"] is True, report
     print("PASS: payload-only ZIP, licenses, fresh extraction, packaged version/self-test/invalid CLI")
 
 

@@ -1,2 +1,5 @@
-# Build tool only; the app itself uses Python's standard library and Tk.
+# What a release build is made from. PyInstaller is the build tool; certifi is the one
+# thing shipped beside Python's standard library and Tk: Mozilla's CA bundle, so the first
+# download works on a Windows whose own root store has not fetched GitHub's root yet.
 PyInstaller==6.22.1
+certifi==2026.10.23

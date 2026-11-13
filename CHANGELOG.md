@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.2.4 - 2026-11-13
+Fixes from a whole-project audit.
+- Runtimes page: a game that keeps each vendor's runtime in its own folder (the Unreal plugin layout) lost every DLL after the sixth. The folder search stopped at six matches, a limit meant for the route detector, while twelve runtime families are tracked. The page now lists them all.
+- Game scan: Xbox, Amazon, emulator and plain `Games` folder searches only looked at drives C to H (C to J for folders). Every local fixed or removable drive is searched now, so a library on a later letter is found. Network and optical drives are not added.
+- Unreal Engine installs (`UE_5.x`, "Unreal Engine") are not listed as games.
+- Runtime check: a publisher build newer than the built-in list was downloaded again on every start until a release pinned it. It is now kept and re-verified from the cache (file id and publisher signature) instead.
+- Runtime check: the lookup at the start of a run spent seven of GitHub's 60 anonymous API requests an hour. It now spends four the first time and none for the next six hours; **check again** still asks the publishers.
+- An installation started after **check again** found a newer NVIDIA build now uses that build instead of the one from before the check.
+- Downloads on a fresh Windows: the release now carries Mozilla's CA certificate bundle (certifi). The code already expected one and the build never shipped it, so a PC whose root store had not yet fetched GitHub's root could fail its first download with a certificate error. The package check refuses a build without the bundle.
+- Help menu: "how it works" opened a README section that no longer exists; "compatibility list" opened the issue tracker and is now called "issues and reports".
+- Documentation: README, START-HERE, runtime sources and the upstream notes described the runtime sources as they were before 2.2.0.
+
 ## 2.2.3 - 2026-11-01
 - Antivirus false positive fixed at the source: Microsoft Defender's ML signatures flagged the shipped `DLSS5-AIO.exe` (`Trojan:Win32/Bearfoos.B!ml`, reproduced locally on the 2.2.2 release bytes). The trigger is the launcher stub that ships inside the PyInstaller wheel, not the app. The build now compiles that launcher from the pinned PyInstaller sdist with MSVC (`scripts/Build-Bootloader.ps1`) and the same app scans clean on the same signature set. A machine without MSVC keeps the stock stub and the build log says so.
 - Anti-cheat: XIGNCODE3 was missed in games that keep it deep in a busy folder - Black Desert Online's `bin64\XignCode`, behind more than eighty files in the same folder. The scan stopped counting at 80 names per folder; it now reads them all. The whole-word rule that keeps `vanguard_outfit.pak` from counting as Riot Vanguard is unchanged.

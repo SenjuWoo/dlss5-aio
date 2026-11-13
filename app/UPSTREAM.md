@@ -24,14 +24,16 @@ Community issue reports target SenjuWoo/dlss5-aio; automatic community-result
 downloads are disabled until this fork publishes its own verified aggregate.
 
 Native NVIDIA SR/RR/FG installation shares AIO's SHA256-pinned runtime catalog
-with DLL maintenance: version 310.9.16 from the RHI community mirror is the
-automatic choice, with NVIDIA SDK 310.9.1 retained as a selectable fallback.
-The installer validates these downloads before preserving or replacing a game
-file. Neural-rendering runtime selection remains separate and GPU-aware;
-updating SR/RR/FG does not provide a newer neural-rendering model. The listed
-versions are the October 14 snapshot. Refreshed mirror DLLs without a bundled
-extracted-DLL pin require a freshly verified valid NVIDIA publisher signature;
-known exact SHA256 pins can be reused offline.
+with DLL maintenance: NVIDIA's own signed SDK build 310.9.16 is the automatic
+choice, with the RHI community mirror's copy of the same version and NVIDIA SDK
+310.9.1 retained as selectable alternatives. A build newer than the pins is
+taken from the publisher's repository once it matches the listed file id and
+carries the publisher's signature. The installer validates these downloads
+before preserving or replacing a game file. Neural-rendering runtime selection
+remains separate and GPU-aware; updating SR/RR/FG does not provide a newer
+neural-rendering model. The pins are the October 30 snapshot. Refreshed mirror
+DLLs without a bundled extracted-DLL pin require a freshly verified valid
+NVIDIA publisher signature; known exact SHA256 pins can be reused offline.
 
 The October 15 v2.0.1 re-audit adds source-bound and bounded downloads,
 preflighted archives, bounded/reaped extractor processes, whole-package

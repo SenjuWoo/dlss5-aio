@@ -30,7 +30,7 @@ The screenshot shows the running application with disposable fixture games. It d
 4. To install neural rendering, open a game. The app reads its executable, graphics API and existing integration, recommends a route and offers **what will happen?** before installation. Components download from their upstream sources when needed.
 5. Play the game, then use **did it work?** to inspect loading/evaluation evidence. **uninstall** removes verified installation files and restores recorded originals. Unproven historical files and backups are retained for review.
 
-Keep the extracted folder together: **DLSS5-AIO.exe** needs the `_internal` folder beside it. The ZIP's SHA256 is in `SHA256SUMS.txt` on the release page. The app is unsigned, so SmartScreen may warn on first run; Defender flagged the older single-file 2.0.1 build as a false positive, and 2.0.2 ships as a one-folder build to avoid that.
+Keep the extracted folder together: **DLSS5-AIO.exe** needs the `_internal` folder beside it. The ZIP's SHA256 is in `SHA256SUMS.txt` on the release page. The app is unsigned, so SmartScreen may warn on first run; Defender flagged the older single-file 2.0.1 build as a false positive; since 2.0.2 the release is a one-folder build, and since 2.2.3 its launcher is compiled from source for the same reason.
 
 Screen capture, video enhancement and image processing are excluded. Settings and caches are separate from installed Autopilot, Swapper and Manager applications.
 
@@ -47,11 +47,11 @@ Windows 10/11 x64 is required. Runtime maintenance does not require an NVIDIA GP
 
 Detected anti-cheat installations and running games are held by default; bulk updates exclude them. DLL replacement is not inherently anti-cheat safe.
 
-## Verified runtime snapshot: October 14, 2026
+## Runtime versions and where they come from
 
-NVIDIA SR/FG/RR **310.9.16** is available from the RHI community mirror; **310.9.1** is the NVIDIA SDK fallback. Downloads are checked against immutable source identities, size, SHA256, PE architecture and actual DLL version. All 12 current maintenance families were also checked with Windows Authenticode; all signatures were valid.
+The built-in list holds the publishers' own signed builds as of October 30, 2026: NVIDIA SR/FG/RR **310.9.16** from NVIDIA's DLSS SDK (the RHI community mirror carries the same version as an alternative, and SDK 310.9.1 stays selectable), AMD FidelityFX SDK **2.4.0** for the split loader, upscaler and frame generation, and Intel XeSS SDK **3.0.2**. Downloads are checked against immutable source identities, size, SHA256, PE architecture and actual DLL version. SDK release numbers differ from the individual DLL versions.
 
-AMD and Intel pins are a verified dated snapshot. Their SDK release numbers differ from the individual DLL versions. NVIDIA's explicit **check again** resolves the live mirror metadata to an exact release asset and checksum; new mirror DLLs without a bundled pin also require a valid NVIDIA publisher signature. Known exact pins can be reused offline. See [the complete source/version record](docs/RUNTIME-SOURCES.md).
+The app also asks the publishers itself. The first runtime lookup of a run and every **check again** read NVIDIA's, AMD's and Intel's repositories; a newer file is taken only when it matches the id GitHub lists for it and carries the publisher's valid signature. A failed lookup keeps the built-in list, which also works offline. See [the complete source/version record](docs/RUNTIME-SOURCES.md).
 
 **The 2x faster DLSS 5 model shipped on October 16 as `nvngx_dlssnr` 310.9.16.** That runtime carries two models: A, the September one, and B, the smaller FP8 model that is up to 40% faster at the same settings and is the default when the runtime is asked for nothing. The build list offers it from the RHI mirror, and the **NR model** row writes the choice where the installed route reads it (`[RenoDX.DLSS5] NRPreset` in ReShade.ini, `[DlssNr] Preset` in OptiScaler.ini). Frame Generation Preset C is a separate thing. [NVIDIA announcement](https://www.nvidia.com/en-us/geforce/news/dlss-5-faster-ai-model-hogwarts-legacy-rtx-spark-laptops/)
 
@@ -90,7 +90,7 @@ Report buttons prepare a GitHub issue form. Opening the browser sends its prefil
 
 ## Build and validation
 
-The application uses Python's standard library and Tk. Python 3.12 and PyInstaller are development tools; the release contains their required runtime.
+The application uses Python's standard library and Tk, plus Mozilla's CA certificate bundle (certifi) so downloads work on a Windows whose own root store is still sparse. Python 3.12 and PyInstaller are development tools; the release contains their required runtime. `pip install -r requirements-build.txt` installs what a build needs.
 
 ```powershell
 python -m unittest discover -s app/tests -p 'test_aio_*.py'

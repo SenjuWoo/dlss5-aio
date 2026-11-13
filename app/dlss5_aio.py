@@ -324,7 +324,11 @@ def main() -> int:
         assert "video" not in {item[0] for item in app.Shell.RAIL_ITEMS}
         assert callable(installer.install) and callable(dlssupdate.update)
         assert callable(gamelock.exclusive) and callable(sources.nvidia_dlss)
-        print(json.dumps({"status": "ok", "version": update.VERSION,
+        # A release without its CA bundle fails its first download on a fresh Windows.
+        bundle = bool(net.ca_bundle())
+        assert bundle or not getattr(sys, "frozen", False), "the build has no CA bundle"
+        net.ssl_context()
+        print(json.dumps({"status": "ok", "version": update.VERSION, "ca_bundle": bundle,
                           "profile": "dlss5-aio", "families": list(dlssupdate.FILE_OF)}))
         return 0
     selected_action = args.check or args.remove or args.scan_dlls or args.update_dlls or args.restore_dlls

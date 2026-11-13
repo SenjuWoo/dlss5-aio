@@ -13,13 +13,12 @@ Deliberately conservative:
   - nothing is deleted during the swap, only renamed; the old build goes
     only after the new one has come up once (settle()).
 
-Two release layouts are understood. Today's is one self-contained .exe.
-A release may instead ship the .exe with an `_internal` folder beside it
-(PyInstaller's one-folder build, which antivirus heuristics take far less
-exception to than a self-extracting single file); then the whole folder is
-fetched and the swap replaces the folder as well as the .exe. This updater
-has to know both BEFORE such a release exists: the copy already on
-someone's PC is the one that will install it.
+Two release layouts are understood. Since 2.0.2 a release ships the .exe
+with an `_internal` folder beside it (PyInstaller's one-folder build, which
+antivirus heuristics take far less exception to than a self-extracting
+single file): the whole folder is fetched and the swap replaces the folder
+as well as the .exe. The older layout, one self-contained .exe, is still
+understood, so a copy from before the change can update itself.
 """
 from __future__ import annotations
 

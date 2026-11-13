@@ -318,17 +318,32 @@ def ssl_context() -> ssl.SSLContext:
     issuer certificate' (issue #54, Windows 11 25H2, two reporters). The
     bundle covers that; the system store stays, so a corporate or antivirus
     root that inspects HTTPS is still trusted.
+
+    The release build carries the bundle (requirements-build.txt, and the
+    package check refuses a build without it). Run from source without
+    certifi installed, the Windows store alone is used.
     """
     global _SSL
     if _SSL is None:
         ctx = ssl.create_default_context()
-        try:
-            import certifi
-            ctx.load_verify_locations(cafile=certifi.where())
-        except Exception:
-            pass
+        bundle = ca_bundle()
+        if bundle:
+            try:
+                ctx.load_verify_locations(cafile=bundle)
+            except (OSError, ssl.SSLError):
+                pass
         _SSL = ctx
     return _SSL
+
+
+def ca_bundle() -> str:
+    """The path of the CA bundle shipped with the build, or "" when there is none."""
+    try:
+        import certifi
+        path = certifi.where()
+        return path if os.path.isfile(path) else ""
+    except Exception:
+        return ""
 
 
 # A server that is overloaded for a second is the commonest failure of

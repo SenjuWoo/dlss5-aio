@@ -17,7 +17,8 @@ README.md explains support boundaries, logging and recovery.
 Log: %LOCALAPPDATA%\dlss5-aio\aio.log; enable debug logging in help.
 The faster NR model shipped October 16 as nvngx_dlssnr 310.9.16, which
 carries models A and B; pick one under NR model on a game page.
-The bundled runtime versions were verified October 14; this is dated evidence.
+The built-in runtime versions were verified October 30; the app also asks
+the publishers for newer signed builds when it is online.
 Report buttons open a prefilled GitHub form: opening sends its details to
 GitHub, and submitting publishes them. Review the form before submitting.
 The old numbered component folders and root SHA256SUMS.txt refer to
