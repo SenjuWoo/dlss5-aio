@@ -314,15 +314,66 @@ class PublisherRefreshTests(RuntimeCatalogTests):
         return get
 
     def fake_download(self, url, name, **kw):
+        self.downloads = getattr(self, "downloads", 0) + 1
         path = self.root / name
         path.write_bytes(self.payload)
         return path
 
-    def refresh(self, **kw):
+    def refresh(self, patient=False, **kw):
         with patch.object(catalog.net, "json_get", side_effect=self.fake_get(**kw)), \
                 patch.object(catalog.net, "download", side_effect=self.fake_download), \
                 patch.object(catalog.pe, "file_version", return_value="310.10.0"):
-            return catalog.catalog(refresh=True)
+            return catalog.catalog(refresh=True, patient=patient)
+
+    def test_a_build_learned_in_one_run_is_not_downloaded_again_in_the_next(self):
+        first = self.refresh()
+        catalog._CATALOG = None                      # the next start of the program
+        second = self.refresh()
+        self.assertEqual(second["dlss"][0]["version"], "310.10.0")
+        self.assertEqual(second, first)
+        self.assertEqual(self.downloads, 1)
+
+    def test_a_cached_file_that_is_no_longer_the_listed_one_is_fetched_again(self):
+        top = self.refresh()["dlss"][0]
+        (self.root / f"runtime-dlss-{top['sha256']}.dll").write_bytes(self.payload + b"tampered")
+        catalog._CATALOG = None
+        self.assertEqual(self.refresh()["dlss"][0]["sha256"], top["sha256"])
+        self.assertEqual(self.downloads, 2)
+
+    def test_the_start_of_a_run_reuses_answers_a_few_hours_old(self):
+        self.refresh(patient=True)
+        asked = len(self.asked)
+        catalog._CATALOG = None
+        self.refresh(patient=True)
+        again = self.asked[asked:]
+        self.assertFalse([u for u in again if "api.github.com" in u], again)
+
+    def test_check_again_always_asks_for_the_head_commit(self):
+        self.refresh(patient=True)
+        asked = len(self.asked)
+        catalog._CATALOG = None
+        self.refresh()
+        self.assertEqual(len([u for u in self.asked[asked:] if u.endswith("/commits/HEAD")]), 3)
+
+    def test_a_commit_listing_is_read_once(self):
+        self.refresh()
+        catalog._CATALOG = None
+        self.refresh()
+        self.assertEqual(len([u for u in self.asked if "/git/trees/" in u and "NVIDIA/DLSS" in u]), 1)
+
+    def test_a_mirror_build_already_pinned_costs_no_api_request(self):
+        pinned = catalog._rhi_build("dlss", "310.9.16", 0, "")
+        feed = {"dlss": [{"version": "310.9.16", "url": pinned["url"]}]}
+        asked = []
+
+        def get(url):
+            asked.append(url)
+            if url == catalog.RHI_FEED:
+                return feed
+            raise OSError("no request expected: " + url)
+        with patch.object(catalog.net, "json_get", side_effect=get), patch.object(catalog, "_refresh_publishers"):
+            catalog.catalog(refresh=True)
+        self.assertEqual(asked, [catalog.RHI_FEED])
 
     def test_a_new_signed_publisher_file_becomes_the_newest_build(self):
         result = self.refresh()

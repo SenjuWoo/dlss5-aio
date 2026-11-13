@@ -497,7 +497,7 @@ def scan_xbox() -> list[Game]:
     """
     out: list[Game] = []
     roots = []
-    for drive in "CDEFGH":
+    for drive in emulators.drive_letters("CDEFGH"):
         roots.append(Path(f"{drive}:/Program Files/ModifiableWindowsApps"))
         roots.append(Path(f"{drive}:/XboxGames"))
     for root in roots:
@@ -564,7 +564,7 @@ def scan_amazon() -> list[Game]:
     # The launcher's SQLite db would be nicer, but the folder is enough and
     # needs no parser: each game is a folder with its exe inside.
     roots = [base]
-    for drive in "CDEFGH":
+    for drive in emulators.drive_letters("CDEFGH"):
         roots.append(Path(f"{drive}:/Amazon Games/Library"))
     for r in roots:
         try:
@@ -652,7 +652,7 @@ def scan_folders() -> list[Game]:
     out: list[Game] = []
     names = ("Games", "Game", "Oyunlar", "Juegos", "Spiele", "Jeux", "Giochi",
              "My Games", "PC Games", "Installed Games")
-    for drive in "CDEFGHIJ":
+    for drive in emulators.drive_letters("CDEFGHIJ"):
         base = Path(f"{drive}:/")
         if not _isdir(base) or is_removable(base):
             continue
@@ -1034,6 +1034,9 @@ NON_GAME_NAMES = frozenset((
 NON_GAME_PREFIXES = ("steamlinuxruntime", "sourcesdkbase", "steamcontroller", "steamworks", "steamvr")
 # Proton builds only ("Proton 9.0", "Proton Experimental"), never a game that starts with the word
 _PROTON = re.compile(r"^proton(\d|experimental|hotfix|easyanticheat|battleye)")
+# The engine itself, as Epic's launcher names its folder ("UE_5.9") or spelled out; a
+# game made with it carries its own name
+_ENGINE = re.compile(r"^(ue[45]\d*|unrealengine\d*)$")
 NON_GAME_PARTS = ("dedicatedserver", "creationkit", "modkit", "sdk")
 
 
@@ -1052,7 +1055,8 @@ def is_non_game(g: "Game") -> bool:
         n = re.sub(r"[^a-z0-9]", "", str(raw).lower())
         if not n:
             continue
-        if n in NON_GAME_NAMES or n.startswith(NON_GAME_PREFIXES) or _PROTON.match(n):
+        if (n in NON_GAME_NAMES or n.startswith(NON_GAME_PREFIXES) or _PROTON.match(n)
+                or _ENGINE.match(n)):
             return True
         # "sdk" inside a word (a game called "Sdkfoo") is not a tool; as the whole
         # name or as its own word at the end ("Source SDK", "Creation Kit") it is

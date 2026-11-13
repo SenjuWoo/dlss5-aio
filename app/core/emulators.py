@@ -44,6 +44,32 @@ def _isdir(p) -> bool:
         return False
 
 
+def _logical_drives() -> dict[str, int]:
+    """{letter: Windows drive type} for every drive letter in use, {} elsewhere."""
+    try:
+        import ctypes
+        kernel = ctypes.windll.kernel32
+        mask = kernel.GetLogicalDrives()
+        return {chr(65 + i): kernel.GetDriveTypeW(f"{chr(65 + i)}:\\")
+                for i in range(26) if mask & (1 << i)}
+    except Exception:
+        return {}
+
+
+def drive_letters(always: str) -> str:
+    """The letters a library search looks at: `always`, then every other local disk.
+
+    The searches used to stop at H (or J), so a library on S: or Z: was never
+    found. Fixed and removable disks are added; a network share or an optical
+    drive is not - one that is offline can hold a scan for a minute. The
+    letters in `always` stay whatever they are, as before.
+    """
+    FIXED, REMOVABLE = 3, 2
+    extra = sorted(letter for letter, kind in _logical_drives().items()
+                   if kind in (FIXED, REMOVABLE) and letter not in always and letter not in "AB")
+    return always + "".join(extra)
+
+
 @dataclass
 class Profile:
     key: str
@@ -156,7 +182,7 @@ def _search_roots() -> list[Path]:
     home = Path.home()
     roots += [home / "Desktop", home / "Downloads", home / "Documents"]
     # Common folders at drive roots
-    for drive in "CDEFGH":
+    for drive in drive_letters("CDEFGH"):
         base = Path(f"{drive}:/")
         if not _isdir(base):
             continue

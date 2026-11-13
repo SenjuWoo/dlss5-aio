@@ -20,13 +20,14 @@ class NonGames(unittest.TestCase):
         for name in ("SlimeVR", "OVR Toolkit", "SteamVR", "Wallpaper Engine",
                      "Steamworks Common Redistributables", "Proton 9.0", "Proton Experimental",
                      "Source SDK Base 2013", "Valheim Dedicated Server", "Skyrim Creation Kit",
-                     "Steam Linux Runtime 3.0 (sniper)"):
+                     "Steam Linux Runtime 3.0 (sniper)", "UE_5.9", "Unreal Engine 5"):
             with self.subTest(name=name):
                 self.assertTrue(games.is_non_game(fake(name)))
 
     def test_games_with_similar_names_stay(self):
         for name in ("Terraria", "VRChat", "HELLDIVERS 2", "Proton Pulse", "Sdkfoo Wars",
-                     "Slime Rancher", "Blender Quest", "Steam Hunters", "tModLoader"):
+                     "Slime Rancher", "Blender Quest", "Steam Hunters", "tModLoader",
+                     "UEFA Champions", "Unreal Tournament"):
             with self.subTest(name=name):
                 self.assertFalse(games.is_non_game(fake(name)))
 

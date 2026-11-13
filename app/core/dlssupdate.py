@@ -363,29 +363,15 @@ def _manifest_files(g, extra_dirs) -> set[str]:
     return out
 
 
-# find_dlss_files stops after this many matches; a remembered walk with fewer
-# ran to its end (or to the budget, which a narrower walk would hit too).
-_WALK_MATCH_STOP = 6
-
-
 def _walk_hits(g, folder: Path) -> list[str]:
-    """The three runtimes under the folder, from detection's walk when it has one.
+    """Every maintained runtime under the folder, from one bounded walk.
 
-    The library's detection walks every game with all of DLSS_FILES and the
-    install folder skipped (dlss.detect); asking again with three names is
-    another key in the walk cache, so the page's read 5 s after start walked
-    every game a second time. A walk that ran to its end holds every one of
-    the three; the install folder's own files are added by the caller.
+    Detection's own walk cannot answer this: it looks for NVIDIA's names only
+    and stops at six matches, and a game with each vendor's runtime in its own
+    plugin folder has more than six. The install folder's own files are added
+    by the caller.
     """
-    names = tuple(FAMILY_OF)
-    try:
-        wide = dlss._WALK_CACHE.get((dlss._walk_key(folder), dlss._walk_key(g.install_dir),
-                                     tuple(dlss.DLSS_FILES)))
-    except Exception:
-        wide = None
-    if wide is not None and len(wide) < _WALK_MATCH_STOP and set(names).issubset(dlss.DLSS_FILES):
-        return [h for h in wide if h.replace("\\", "/").rsplit("/", 1)[-1].lower() in names]
-    return dlss.walked(folder, names=names)
+    return dlss.walked(folder, names=tuple(FAMILY_OF), limit=0)
 
 
 def _candidates(g, fresh: bool) -> list[Path]:
@@ -493,19 +479,22 @@ def newest(catalog: dict | None = None, refresh: bool = False) -> dict[str, dict
     """
     global _NEWEST
     remember = catalog is None
+    patient = False
     if catalog is None and not refresh:
-        refresh = runtimecatalog.live_first()      # the first answer of a run asks the publishers
+        # the first answer of a run asks the publishers, without spending API
+        # requests on what was read a few hours ago; "check again" always asks
+        refresh = patient = runtimecatalog.live_first()
     if refresh and catalog is None:
-        # sources remembers the tag for the run as well; forgetting only ours
-        # would read the same old answer back. What we had stays until a new
-        # answer replaces it, so an update right after a failed check still
-        # has a build to take.
-        sources._NVIDIA_CACHE = None
+        # The installer's build list holds a copy of these rows for the run;
+        # left alone, an install after "check again" would still take the
+        # build from before it. What we had here stays until a new answer
+        # replaces it, so an update right after a failed check has a build.
+        sources._CATALOG_CACHE = None
     if catalog is None:
         if _NEWEST and not refresh:
             return dict(_NEWEST)
         try:
-            catalog = runtimecatalog.catalog(refresh=refresh)
+            catalog = runtimecatalog.catalog(refresh=refresh, patient=patient)
         except Exception as e:
             log.write(f"reading runtime builds failed: {e}", "warn")
             catalog = {}

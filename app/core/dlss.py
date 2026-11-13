@@ -154,19 +154,21 @@ def _walk_key(p) -> str:
 
 
 def walked(folder: Path, skip_dir: Path | None = None,
-           names: tuple[str, ...] = DLSS_FILES) -> list[str]:
+           names: tuple[str, ...] = DLSS_FILES, limit: int = 6) -> list[str]:
     """find_dlss_files, remembered for as long as the program runs.
 
     `names` is part of the key: the walk stops after six matches, so a
     six-name search and a one-name search are not the same question and
     must not share an answer. Asking for one name can find a runtime that
-    the five-name walk spent its budget before reaching.
+    the five-name walk spent its budget before reaching. `limit` is part of
+    it for the same reason: 0 asks for every match (the runtimes page), and
+    must not be answered from a walk that stopped at six.
     """
     key = (_walk_key(folder), _walk_key(skip_dir) if skip_dir else "",
-           tuple(names))
+           tuple(names)) + ((limit,) if limit != 6 else ())
     hit = _WALK_CACHE.get(key)
     if hit is None:
-        hit = find_dlss_files(folder, skip_dir=skip_dir, names=names)
+        hit = find_dlss_files(folder, skip_dir=skip_dir, names=names, limit=limit)
         try:
             Path(folder).resolve()
             reachable = True
@@ -201,12 +203,16 @@ def _holds_runtime(d: Path) -> bool:
 
 def find_dlss_files(folder: Path, skip_dir: Path | None = None,
                     names: tuple[str, ...] = DLSS_FILES,
-                    extra_skip: tuple[str, ...] = ()) -> list[str]:
+                    extra_skip: tuple[str, ...] = (), limit: int = 6) -> list[str]:
     """Relative paths of the game's own DLSS files anywhere under `folder`.
 
     `skip_dir` is the folder this tool installs into: a runtime we put there
     must not count as the game's own (that is what _ours handles there).
     `names` lets the same bounded walk look for other runtimes (FSR, XeSS).
+    `limit` stops the walk once that many are found: detection only needs
+    proof a runtime is there. 0 lists them all, still inside the folder and
+    time budget - the runtimes page must not lose the seventh DLL of a game
+    that keeps each vendor's files in a plugin folder of its own.
     """
     import os
     out: list[str] = []
@@ -257,7 +263,7 @@ def find_dlss_files(folder: Path, skip_dir: Path | None = None,
                     out.append(str((rp / f).relative_to(folder)))
                 except ValueError:
                     out.append(str(rp / f))
-        if len(out) >= 6:
+        if limit and len(out) >= limit:
             break
     return out
 

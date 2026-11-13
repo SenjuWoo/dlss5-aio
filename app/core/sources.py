@@ -943,7 +943,8 @@ def rhi_catalog(force: bool = False) -> dict[str, list[dict]]:
 def nvidia_dlss() -> dict[str, list[dict]]:
     """Use the maintenance catalog's verified NVIDIA builds for installation too."""
     from . import runtimecatalog
-    catalog = runtimecatalog.catalog(refresh=runtimecatalog.live_first())
+    first = runtimecatalog.live_first()
+    catalog = runtimecatalog.catalog(refresh=first, patient=first)
     out = {}
     for family in ("dlss", "dlssd", "dlssg"):
         rows = catalog.get(family, [])

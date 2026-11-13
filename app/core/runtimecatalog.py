@@ -1,6 +1,8 @@
 """Verified, exact-filename NVIDIA, AMD and Intel runtime downloads.
 
-Publisher pins work offline; an explicit refresh checks RHI's NVIDIA feed.
+Publisher pins work offline. A refresh asks NVIDIA's, AMD's and Intel's own
+repositories and RHI's NVIDIA feed for anything newer; what it learns is
+verified again from the cache on the next run instead of downloaded again.
 Downloads use the application's cache and log, never a game folder.
 """
 from __future__ import annotations
@@ -15,6 +17,7 @@ import stat
 import struct
 import tempfile
 import threading
+import time
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path, PurePosixPath
@@ -122,6 +125,73 @@ def live_first() -> bool:
     _LIVE_TRIED = True
     return True
 _CACHE_LOCK = threading.RLock()
+# GitHub allows 60 anonymous API requests an hour per address, and an install needs
+# some of them. The read at the start of a run takes an answer this recent from disk;
+# "check again" always asks. A commit's file listing never changes and is kept.
+ASK_AGAIN_AFTER = 6 * 3600
+_LEARNED = "publisher-builds.json"
+
+
+def _save_json(target: Path, data) -> None:
+    """Whole or not at all; a cache that cannot be written is only a slower next run."""
+    part = target.with_name(target.name + ".part")
+    try:
+        part.write_text(json.dumps(data), encoding="utf8")
+        part.replace(target)
+    except (OSError, TypeError, ValueError):
+        part.unlink(missing_ok=True)
+
+
+def _ask(url: str, max_age: float = 0):
+    """JSON from `url`, or the copy saved within `max_age` seconds. Every answer is saved."""
+    import hashlib
+    saved = net.cache_dir() / ("api-" + hashlib.sha256(url.encode("utf8")).hexdigest()[:32] + ".json")
+    if max_age:
+        try:
+            if time.time() - saved.stat().st_mtime < max_age:
+                return json.loads(saved.read_text(encoding="utf8"))
+        except (OSError, ValueError):
+            pass
+    data = net.json_get(url)
+    _save_json(saved, data)
+    return data
+
+
+def _learned() -> dict:
+    """{git blob id: SHA256} of publisher files verified in an earlier run. A hint only:
+    the file it points at is hashed and its signature checked again before it is used."""
+    try:
+        data = json.loads((net.cache_dir() / _LEARNED).read_text(encoding="utf8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {k: v for k, v in data.items()
+            if isinstance(k, str) and isinstance(v, str) and _SHA1.fullmatch(k) and _SHA.fullmatch(v)}
+
+
+def _listing(repo: str, head: str, folders: set) -> dict:
+    """{path: GitHub's blob entry} for the runtime folders of one commit.
+
+    A commit's contents never change, so the answer is kept for good - and only the
+    DLLs under the runtime folders, not the repository's whole tree.
+    """
+    saved = net.cache_dir() / f"tree-{head}.json"
+    try:
+        files = json.loads(saved.read_text(encoding="utf8"))
+        if isinstance(files, dict):
+            return files
+    except (OSError, ValueError):
+        pass
+    tree = net.json_get(f"https://api.github.com/repos/{repo}/git/trees/{head}?recursive=1")
+    if not isinstance(tree, dict) or tree.get("truncated"):
+        raise ValueError("repository listing is incomplete")
+    files = {t["path"]: {"path": t["path"], "sha": t.get("sha"), "size": t.get("size")}
+             for t in tree.get("tree", [])
+             if isinstance(t, dict) and t.get("type") == "blob" and isinstance(t.get("path"), str)
+             and t["path"].startswith(tuple(folders)) and t["path"].lower().endswith(".dll")}
+    _save_json(saved, files)
+    return files
 
 
 def _version(value: str) -> tuple:
@@ -183,6 +253,9 @@ def _refresh_family(family: str, items: list) -> dict | None:
     expected = _rhi_build(family, version, 0, "")
     if best.get("url") != expected["url"]:
         raise ValueError(f"{family}: unexpected runtime source URL")
+    # The mirror's newest is a build already known with its checksum: nothing to ask.
+    if any(row.get("url") == expected["url"] and row.get("archive_sha256") for row in _CATALOG[family]):
+        return None
     release = net.json_get(RHI_API + family + "-" + version)
     hits = [asset for asset in release.get("assets", [])
             if asset.get("browser_download_url") == expected["url"]]
@@ -196,13 +269,17 @@ def _refresh_family(family: str, items: list) -> dict | None:
     return _rhi_build(family, version, size, digest)
 
 
-def catalog(refresh: bool = False) -> dict:
-    """Return detached catalog entries; a failed refresh preserves known pins."""
+def catalog(refresh: bool = False, patient: bool = False) -> dict:
+    """Return detached catalog entries; a failed refresh preserves known pins.
+
+    `patient` is the refresh a run makes by itself: it accepts the publishers' head
+    commits as read within ASK_AGAIN_AFTER rather than spend API requests on them.
+    """
     global _CATALOG
     if _CATALOG is None:
         _CATALOG = _pinned()
     if refresh:
-        _refresh_publishers()
+        _refresh_publishers(ASK_AGAIN_AFTER if patient else 0)
         try:
             feed = net.json_get(RHI_FEED)
             if not isinstance(feed, dict):
@@ -345,7 +422,16 @@ def _take_publisher_build(repo: str, commit: str, family: str, item: dict | None
         return
     url = f"https://raw.githubusercontent.com/{repo}/{commit}/{item['path']}"
     with _CACHE_LOCK, net.cache_locked():
-        got = net.download(url, f"publisher-{family}-{blob}.dll", max_bytes=size)
+        # A build verified in an earlier run is still in the cache under its SHA256.
+        # Without this every start downloaded a new SDK's DLLs again, over 100 MB,
+        # until a release of this tool pinned them.
+        known = _learned()
+        kept = net.cache_dir() / f"runtime-{family}-{known.get(blob, '')}.dll"
+        try:
+            reuse = kept.is_file() and kept.stat().st_size == size and _git_blob_id(kept) == blob
+        except OSError:
+            reuse = False
+        got = kept if reuse else net.download(url, f"publisher-{family}-{blob}.dll", max_bytes=size)
         try:
             if got.stat().st_size != size or _git_blob_id(got) != blob:
                 raise ValueError("download does not match the repository's own file id")
@@ -356,9 +442,14 @@ def _take_publisher_build(repo: str, commit: str, family: str, item: dict | None
                 raise ValueError(f"unreadable FileVersion {version!r}")
             digest = net.sha256(got)
             dest = net.cache_dir() / f"runtime-{family}-{digest}.dll"
-            got.replace(dest)
+            if got != dest:
+                got.replace(dest)
+            if known.get(blob) != digest:
+                known[blob] = digest
+                _save_json(net.cache_dir() / _LEARNED, known)
         except Exception:
-            got.unlink(missing_ok=True)
+            if not reuse:
+                got.unlink(missing_ok=True)
             raise
     folder = item["path"][:-len(FILE_OF[family])]
     entry = _entry(family, version, size, digest, repo, commit, folder, blob)
@@ -372,13 +463,14 @@ def _take_publisher_build(repo: str, commit: str, family: str, item: dict | None
     log.write(f"runtime catalog {family}: {version} from {repo}@{commit[:10]}")
 
 
-def _refresh_publishers() -> None:
+def _refresh_publishers(max_age: float = 0) -> None:
     """Newest signed builds straight from NVIDIA's, AMD's and Intel's own repositories.
 
     A repository is read only when its head is not a commit already known, and a file is
     downloaded only when GitHub lists a blob the catalog does not have. Each download must
     match the blob id GitHub lists, be a valid x64 DLL, carry the publisher's signature and
-    a readable FileVersion. Any failure keeps the pins already verified.
+    a readable FileVersion. Any failure keeps the pins already verified. `max_age`
+    accepts a head commit read that recently; a commit's listing is read once.
     """
     repos: dict[str, dict] = {}
     for family, _v, _s, _d, repo, commit, folder in _PINS + _PINS_LATEST:
@@ -387,16 +479,13 @@ def _refresh_publishers() -> None:
         info["known"].add(commit)
     for repo, info in repos.items():
         try:
-            head = str(net.json_get(f"https://api.github.com/repos/{repo}/commits/HEAD").get("sha", ""))
+            head = str(_ask(f"https://api.github.com/repos/{repo}/commits/HEAD", max_age).get("sha", ""))
             if not _SHA1.fullmatch(head):
                 raise ValueError("no usable head commit")
             if head in info["known"] or any(row.get("source", "").endswith(head)
                                             for rows in _CATALOG.values() for row in rows):
                 continue
-            tree = net.json_get(f"https://api.github.com/repos/{repo}/git/trees/{head}?recursive=1")
-            if not isinstance(tree, dict) or tree.get("truncated"):
-                raise ValueError("repository listing is incomplete")
-            files = {t.get("path"): t for t in tree.get("tree", []) if t.get("type") == "blob"}
+            files = _listing(repo, head, set(info["folders"].values()))
         except Exception as exc:
             log.write(f"runtime catalog {repo}: {exc}; keeping verified pins", "warn")
             continue
