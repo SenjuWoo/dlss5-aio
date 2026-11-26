@@ -6,7 +6,10 @@ $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
 $tool = Join-Path $repo '06-DLL-Refresher\DLSS-DLL-Refresher.ps1'
 # GitHub's checkout parent is named dlss5-aio, which production correctly protects.
-$fixtureRoot = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { Split-Path -Parent $repo }
+# The repo's own parent is not safe either: a clone kept under a folder named
+# Backup (or backups, profiles, models...) is skipped by the same rule, so every
+# fixture would be invisible. The system temp folder carries none of those names.
+$fixtureRoot = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [IO.Path]::GetTempPath() }
 $fixtureRoot = [IO.Path]::GetFullPath($fixtureRoot)
 $fixture = Join-Path $fixtureRoot ('refresher-tests-' + [guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory($fixture) | Out-Null

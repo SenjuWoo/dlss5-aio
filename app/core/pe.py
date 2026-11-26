@@ -54,7 +54,12 @@ def file_version(path) -> str:
         import ctypes
         import ctypes.wintypes as w
         ver = ctypes.WinDLL("version", use_last_error=True)
-        p = str(Path(path))
+        # Absolute, always: the version API opens the file through the DLL
+        # loader, which resolves a relative path against the DLL search path,
+        # not the working folder. The release's PyInstaller bootloader calls
+        # SetDllDirectoryW, which drops the working folder from that path, so
+        # `DLSS5-AIO.exe "Game" --scan-dlls` read every version as "" (2.2.4).
+        p = os.path.abspath(str(Path(path)))
         size = ver.GetFileVersionInfoSizeW(w.LPCWSTR(p), None)
         if not size:
             return ""

@@ -821,6 +821,11 @@ def update(g, families=None, build: str | None = None, allow_anticheat: bool = F
                 rep.skipped.append(f"{LABEL[e.family]}: no build {build}")
                 continue
             new = dict(wanted, version=_number(wanted["label"]))
+        elif not e.version:
+            # No stamp read means "unknown", never "current": the line is left
+            # alone, and it says why instead of claiming an empty version is new.
+            rep.skipped.append(f"{LABEL[e.family]}: no version could be read from the file - left unchanged")
+            continue
         elif not outdated(e, new):
             rep.skipped.append(f"{LABEL[e.family]}: {e.version} is current")
             continue

@@ -7,8 +7,12 @@ import json
 import os
 import subprocess
 import tempfile
+import sys
 import zipfile
 from pathlib import Path, PurePosixPath
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app" / "_tools"))
+from fake_pe import dll  # noqa: E402  (a real VERSIONINFO Windows itself reads)
 
 
 def main():
@@ -47,7 +51,19 @@ def main():
                 if flag == "--self-test":
                     report = json.loads(result.stdout)
                     assert report["status"] == "ok" and report["ca_bundle"] is True, report
-    print("PASS: payload-only ZIP, licenses, fresh extraction, packaged version/self-test/invalid CLI")
+            # A game named by a relative path: the bootloader's SetDllDirectoryW made 2.2.4
+            # read every version as "" here. Source runs cannot see this; only the frozen exe can.
+            game = Path(directory) / "Fixture Game" / "bin"
+            game.mkdir(parents=True)
+            (game / "FixtureGame.exe").write_bytes(dll("1.0.0"))
+            (game / "nvngx_dlss.dll").write_bytes(dll("3.7.20"))
+            result = subprocess.run([str(exe), "Fixture Game", "--scan-dlls"], capture_output=True, text=True,
+                                    env=env, cwd=directory, timeout=180)
+            assert result.returncode == 0, ("--scan-dlls", result.returncode, result.stdout, result.stderr)
+            rows = json.loads(result.stdout)["runtimes"]
+            assert [(r["family"], r["version"]) for r in rows] == [("dlss", "3.7.20")], rows
+    print("PASS: payload-only ZIP, licenses, fresh extraction, packaged version/self-test/invalid CLI, "
+          "relative-target runtime scan")
 
 
 if __name__ == "__main__":

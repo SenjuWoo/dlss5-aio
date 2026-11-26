@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.2.5 - 2026-11-25
+- Command line: a game given by a relative path (`DLSS5-AIO.exe "Game" --scan-dlls` from the folder above it) read every runtime version as blank, and `--update-dlls` then reported a 3.7.20 DLL as "is current" and left it alone. Windows' version API resolves a relative file name through the DLL search path, and the release's launcher removes the working folder from that path. The version reader now always passes an absolute path; an absolute target always worked, and the window was never affected.
+- A runtime whose version cannot be read is now reported as "no version could be read from the file - left unchanged" instead of "is current".
+- The package check runs a relative-path `--scan-dlls` on a fixture game from the packaged executable, so this cannot come back unnoticed; the 2.2.4 release fails that check.
+- The legacy refresher test put its scratch folder beside the repository, which the refresher correctly skips when the clone sits under a folder named `Backup`; it now uses the system temp folder (CI keeps using the runner's temp folder).
+- README rebuilt around the real interface and terminal runs, with a command table and the built-in runtime versions in one place.
+
 ## 2.2.4 - 2026-11-13
 Fixes from a whole-project audit.
 - Runtimes page: a game that keeps each vendor's runtime in its own folder (the Unreal plugin layout) lost every DLL after the sixth. The folder search stopped at six matches, a limit meant for the route detector, while twelve runtime families are tracked. The page now lists them all.
